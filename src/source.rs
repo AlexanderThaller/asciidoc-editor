@@ -25,14 +25,20 @@ impl LineRange {
     }
 }
 
-/// The lines of the paragraph beginning at `start`.
+/// The lines of the block's own content, beginning at or below `start`.
 ///
-/// A paragraph runs until the next blank line or the end of the document,
-/// which is exactly the span the rich-text surface replaces when the paragraph
-/// is edited.
+/// A block's recorded line points at the first line attached to it, which may
+/// be a title or an attribute list rather than its content; those are skipped.
+/// The content then runs to the next blank line or the end of the document,
+/// which is the span the rich-text surface replaces when the block is edited.
 pub fn paragraph_range(src: &str, start: usize) -> LineRange {
-    let mut end = start;
+    let mut start = start;
 
+    while is_attached(&text_of(src, LineRange::single(start))) {
+        start += 1;
+    }
+
+    let mut end = start;
     for (index, line) in src.lines().enumerate().skip(start) {
         if line.trim().is_empty() {
             break;
@@ -41,6 +47,44 @@ pub fn paragraph_range(src: &str, start: usize) -> LineRange {
     }
 
     LineRange { start, end }
+}
+
+/// Whether the line belongs to the block below it rather than being content:
+/// a block title or an attribute list.
+fn is_attached(line: &str) -> bool {
+    is_block_title(line) || (line.starts_with('[') && line.trim_end().ends_with(']'))
+}
+
+/// Inserts `text` as a line of its own before `line`.
+pub fn insert_line(src: &str, line: usize, text: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut inserted = false;
+
+    for (index, existing) in src.lines().enumerate() {
+        if index + 1 == line {
+            out.push(text);
+            inserted = true;
+        }
+        out.push(existing);
+    }
+
+    if !inserted {
+        out.push(text);
+    }
+
+    restore_trailing_newline(out.join("\n"), src)
+}
+
+/// Removes `line`.
+pub fn remove_line(src: &str, line: usize) -> String {
+    let kept: Vec<&str> = src
+        .lines()
+        .enumerate()
+        .filter(|(index, _)| index + 1 != line)
+        .map(|(_, existing)| existing)
+        .collect();
+
+    restore_trailing_newline(kept.join("\n"), src)
 }
 
 /// The marker a list item line starts with, if it is one.
@@ -63,6 +107,20 @@ pub fn list_marker(line: &str) -> Option<&str> {
     // title and `----` is a delimiter.
     let rest = &trimmed[marker.len()..];
     (rest.starts_with(' ') && !rest.trim().is_empty()).then_some(marker)
+}
+
+/// Admonition labels, in the inline form `NOTE: text`.
+const ADMONITIONS: [&str; 5] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
+
+/// The label an inline admonition starts with, including its separator.
+///
+/// The label lives in the source but not in the rendered content, so editing
+/// an admonition has to put it back.
+pub fn admonition_lead(line: &str) -> Option<&str> {
+    ADMONITIONS.iter().find_map(|label| {
+        line.get(..label.len() + 2)
+            .filter(|lead| lead.starts_with(label) && lead.ends_with(": "))
+    })
 }
 
 /// Whether the line is a block title (`.Title`).
@@ -270,6 +328,22 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_range_skips_lines_attached_above_the_block() {
+        let titled = "= T\n\n.A title\n[.lead]\nThe paragraph\nwraps here\n\nAfter\n";
+
+        assert_eq!(paragraph_range(titled, 3), LineRange { start: 5, end: 6 });
+    }
+
+    #[test]
+    fn inserts_and_removes_single_lines() {
+        let doc = "= T\n\nBody\n";
+
+        assert_eq!(insert_line(doc, 3, ".A title"), "= T\n\n.A title\nBody\n");
+        assert_eq!(remove_line("= T\n\n.A title\nBody\n", 3), "= T\n\nBody\n");
+        assert_eq!(insert_line(doc, 99, "Tail"), "= T\n\nBody\nTail\n");
+    }
+
+    #[test]
     fn reads_the_text_of_a_range() {
         assert_eq!(
             text_of(DOC, LineRange { start: 3, end: 4 }),
@@ -314,6 +388,16 @@ mod tests {
     #[test]
     fn inserts_a_block_past_the_end() {
         assert_eq!(insert_block("a\n", 99, "b"), "a\n\nb\n");
+    }
+
+    #[test]
+    fn recognises_admonition_labels() {
+        assert_eq!(admonition_lead("NOTE: something"), Some("NOTE: "));
+        assert_eq!(admonition_lead("WARNING: careful"), Some("WARNING: "));
+        assert_eq!(admonition_lead("NOTE:no space"), None);
+        assert_eq!(admonition_lead("Note: lowercase"), None);
+        assert_eq!(admonition_lead("NOTE"), None);
+        assert_eq!(admonition_lead("Body text"), None);
     }
 
     #[test]

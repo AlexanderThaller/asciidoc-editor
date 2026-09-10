@@ -29,6 +29,10 @@ fn main() {
 
 NOTE: Warnings from the parser appear in the status bar below.
 
+TIP: Click any block in rich text mode to edit it in place.
+
+WARNING: Blocks that cannot be written back stay read-only.
+
 .A table
 [cols="1,2"]
 |===

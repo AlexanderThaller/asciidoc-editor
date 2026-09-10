@@ -21,14 +21,19 @@ html, body {
   font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+/*
+ * Flex rather than fixed grid rows: the context bar is only present in rich
+ * text mode, and the layout must not depend on how many rows exist.
+ */
 body {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---- toolbar ---- */
 
 .toolbar {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -73,7 +78,28 @@ body {
 
 /* ---- panes ---- */
 
+/* Context bar: what is focused, and what can be done to it. */
+.toolbar.context {
+  min-height: 2.1rem;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+  background: #1e242c;
+}
+
+.chip {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #2b313a;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hint { color: var(--fg-dim); font-style: italic; }
+
 .panes {
+  flex: 1;
   display: grid;
   grid-template-columns: 1fr 1px 1fr;
   min-height: 0;
@@ -156,6 +182,7 @@ body {
 /* ---- status bar ---- */
 
 .status {
+  flex: none;
   padding: 0.35rem 0.75rem;
   background: var(--bg-raised);
   border-top: 1px solid var(--border);

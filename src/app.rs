@@ -24,6 +24,17 @@ const PREVIEW_SHELL: &str = r#"<!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="/assets/asciidoctor-default.css">
 <style>
 body{margin:0;padding:1.25rem 1.5rem}
+/*
+ * Admonition icons. The renderer only emits Font Awesome glyphs when the
+ * document may enable `icons`, which safe mode forbids, and a webfont would
+ * not load offline anyway — so the label draws its own symbol.
+ */
+.admonitionblock td.icon .title::before{display:block;font-size:1.5em;line-height:1;margin-bottom:.15rem;font-style:normal}
+.admonitionblock.note td.icon .title::before{content:"\2139\FE0F"}
+.admonitionblock.tip td.icon .title::before{content:"\1F4A1"}
+.admonitionblock.important td.icon .title::before{content:"\2757"}
+.admonitionblock.warning td.icon .title::before{content:"\26A0\FE0F"}
+.admonitionblock.caution td.icon .title::before{content:"\1F525"}
 [data-edit-line]{border-radius:3px}
 [data-edit-line]:hover{background:rgba(127,180,255,.08)}
 [data-edit-line]:focus{outline:2px solid rgba(127,180,255,.5);outline-offset:4px}
@@ -117,6 +128,22 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    let apply_title = move |add: bool| {
+        if let Some(document) = preview_document(frame) {
+            if add {
+                wysiwyg::add_title(&document, source, &rerender);
+            } else {
+                wysiwyg::remove_title(&document, source, &rerender);
+            }
+        }
+    };
+
+    let apply_indent = move |outdent: bool| {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::reindent_focused(&document, source, outdent);
+        }
+    };
+
     // Clicking the kind a block already is turns it back into body text, the
     // way a list button behaves everywhere else.
     let apply_list = move |ordered: bool| {
@@ -206,7 +233,14 @@ pub fn App() -> impl IntoView {
                         class="button icon"
                         title="Bulleted list"
                         disabled=move || {
-                            editing.get().map(|block| block.kind) == Some(wysiwyg::Kind::Title)
+                            editing
+                                .get()
+                                .is_some_and(|block| {
+                                    matches!(
+                                        block.kind,
+                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition
+                                    )
+                                })
                         }
                         class:active=move || {
                             editing.get().map(|block| block.kind)
@@ -221,7 +255,14 @@ pub fn App() -> impl IntoView {
                         class="button icon"
                         title="Numbered list"
                         disabled=move || {
-                            editing.get().map(|block| block.kind) == Some(wysiwyg::Kind::Title)
+                            editing
+                                .get()
+                                .is_some_and(|block| {
+                                    matches!(
+                                        block.kind,
+                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition
+                                    )
+                                })
                         }
                         class:active=move || {
                             editing.get().map(|block| block.kind)
@@ -243,7 +284,9 @@ pub fn App() -> impl IntoView {
                             editing.get().is_some_and(|block| {
                                 matches!(
                                     block.kind,
-                                    wysiwyg::Kind::List { .. } | wysiwyg::Kind::Title
+                                    wysiwyg::Kind::List { .. }
+                                        | wysiwyg::Kind::Title
+                                        | wysiwyg::Kind::Admonition
                                 )
                             })
                         }
@@ -266,7 +309,9 @@ pub fn App() -> impl IntoView {
                                         editing.get().is_some_and(|block| {
                                             matches!(
                                                 block.kind,
-                                                wysiwyg::Kind::List { .. } | wysiwyg::Kind::Title
+                                                wysiwyg::Kind::List { .. }
+                                                    | wysiwyg::Kind::Title
+                                                    | wysiwyg::Kind::Admonition
                                             )
                                         })
                                     }
@@ -317,6 +362,66 @@ pub fn App() -> impl IntoView {
                 "Export .html"
             </button>
         </header>
+
+        <Show when=move || mode.get() == Mode::Rich>
+            <header class="toolbar context">
+                {move || match editing.get() {
+                    None => {
+                        view! {
+                            <span class="hint">"Click any block to edit it"</span>
+                        }
+                            .into_any()
+                    }
+                    Some(block) => {
+                        let titled = block.title_line.is_some();
+                        let is_title = block.kind == wysiwyg::Kind::Title;
+                        let is_list = matches!(block.kind, wysiwyg::Kind::List { .. });
+                        // A heading is a title already; AsciiDoc gives it none.
+                        let takes_title = !matches!(block.kind, wysiwyg::Kind::Heading(_));
+                        view! {
+                            <span class="chip">{describe(block.kind)}</span>
+
+                            <Show when=move || takes_title>
+                                <button
+                                    class="button"
+                                    title=if titled { "Remove the block title" } else { "Add a block title" }
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_title(!titled)
+                                >
+                                    {if titled { "Remove title" } else { "Add title" }}
+                                </button>
+                            </Show>
+
+                            <Show when=move || is_list>
+                                <span class="separator"></span>
+                                <button
+                                    class="button icon"
+                                    title="Outdent: lift this item out a level (shift+tab)"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_indent(true)
+                                >
+                                    "⇤"
+                                </button>
+                                <button
+                                    class="button icon"
+                                    title="Indent: nest this item under the one above (tab)"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_indent(false)
+                                >
+                                    "⇥"
+                                </button>
+                            </Show>
+
+                            <Show when=move || is_title>
+                                <span class="hint">"Titles are a single line"</span>
+                            </Show>
+                        }
+                            .into_any()
+                    }
+                }}
+            </header>
+        </Show>
+
 
         <main class="panes" class:rich=move || mode.get() == Mode::Rich>
             <section class="editor">
@@ -377,6 +482,18 @@ pub fn App() -> impl IntoView {
                 }
             }}
         </footer>
+    }
+}
+
+/// Names the focused block for the context bar.
+fn describe(kind: wysiwyg::Kind) -> String {
+    match kind {
+        wysiwyg::Kind::Body => "Paragraph".to_string(),
+        wysiwyg::Kind::Heading(level) => format!("Heading {}", level.saturating_sub(1).max(1)),
+        wysiwyg::Kind::List { ordered: false } => "Bulleted list".to_string(),
+        wysiwyg::Kind::List { ordered: true } => "Numbered list".to_string(),
+        wysiwyg::Kind::Title => "Block title".to_string(),
+        wysiwyg::Kind::Admonition => "Admonition".to_string(),
     }
 }
 

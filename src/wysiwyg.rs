@@ -36,6 +36,9 @@ use crate::{
 pub struct Block {
     pub line: usize,
     pub kind: Kind,
+    /// The line of the title attached to this block, when it has one. Also set
+    /// on a title itself, which is its own.
+    pub title_line: Option<usize>,
 }
 
 /// What a block is, as far as the toolbar is concerned.
@@ -48,6 +51,8 @@ pub enum Kind {
     },
     /// The title attached to a block, such as `.Things that work`.
     Title,
+    /// An inline admonition, such as `NOTE: mind the gap`.
+    Admonition,
 }
 
 /// Start line of the source the block was rendered from.
@@ -62,6 +67,9 @@ const MARKER: &str = "data-edit-marker";
 const TITLE: &str = "data-edit-title";
 /// Text the renderer generates in front of a title, such as a table's number.
 const PREFIX: &str = "data-edit-prefix";
+/// Text the source carries in front of the content but the rendering drops,
+/// such as an admonition's `NOTE: ` label.
+const LEAD: &str = "data-edit-lead";
 
 /// Explains why a block that looks editable is not.
 const REFUSED: &str = "This block can only be edited in source mode";
@@ -128,6 +136,25 @@ pub fn mark_editable(content: &Element, src: &str) {
         }
 
         offer(&items, range, Kind::Body, &source::text_of(src, range));
+    }
+
+    for block in select(content, "div.admonitionblock[data-source-line]") {
+        let (Some(line), Ok(Some(body))) = (line_of(&block), block.query_selector("td.content"))
+        else {
+            continue;
+        };
+
+        let range = source::paragraph_range(src, line);
+        let text = source::text_of(src, range);
+
+        // Only the inline form carries its label on the same line; the
+        // delimited form is a block of its own and is left to source mode.
+        let Some(lead) = source::admonition_lead(&text) else {
+            continue;
+        };
+
+        let _ = body.set_attribute(LEAD, lead);
+        offer(&body, range, Kind::Admonition, &text[lead.len()..]);
     }
 
     for block in select(content, "[data-source-line]") {
@@ -231,9 +258,28 @@ fn serialize(element: &Element) -> String {
         .to_string()
 }
 
+/// The line of the block's title, whether the block *is* the title or merely
+/// carries one.
+fn title_line_of(block: &Element) -> Option<usize> {
+    if block.has_attribute(TITLE) {
+        return attr(block, LINE);
+    }
+
+    let title = block
+        .parent_element()?
+        .query_selector(&format!(":scope > [{TITLE}]"))
+        .ok()??;
+
+    attr(&title, LINE)
+}
+
 fn kind_of(block: &Element) -> Kind {
     if block.has_attribute(TITLE) {
         return Kind::Title;
+    }
+
+    if block.has_attribute(LEAD) {
+        return Kind::Admonition;
     }
 
     if is_list(block) {
@@ -274,6 +320,12 @@ pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) 
             source::as_title(written.strip_prefix(&prefix).unwrap_or(&written))
         }
         Kind::Heading(level) => source::as_block(&serialize(block), Some(level)),
+        // The label is part of the source line but not of what is rendered.
+        Kind::Admonition => format!(
+            "{}{}",
+            block.get_attribute(LEAD).unwrap_or_default(),
+            serialize(block)
+        ),
         _ => serialize(block),
     };
 
@@ -350,6 +402,7 @@ pub fn attach<R>(
             Some(Block {
                 line: attr(&block, LINE)?,
                 kind: kind_of(&block),
+                title_line: title_line_of(&block),
             })
         }));
     };
@@ -667,10 +720,9 @@ pub fn set_list<R>(
 ) where
     R: Fn(Option<usize>),
 {
-    let Some(block) = document
-        .active_element()
-        .filter(|block| block.has_attribute(LINE) && !block.has_attribute(TITLE))
-    else {
+    let Some(block) = document.active_element().filter(|block| {
+        block.has_attribute(LINE) && !block.has_attribute(TITLE) && !block.has_attribute(LEAD)
+    }) else {
         return;
     };
     let Some(start) = attr(&block, LINE) else {
@@ -686,6 +738,97 @@ pub fn set_list<R>(
     ));
 
     rerender(Some(start));
+}
+
+/// Placeholder for a title that has just been added, selected so that the
+/// first keystroke replaces it.
+const NEW_TITLE: &str = "Title";
+
+/// Gives the focused block a title, and puts the caret in it.
+pub fn add_title<R>(document: &Document, source: RwSignal<String>, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let Some(block) = focused(document) else {
+        return;
+    };
+    let Some(line) = attr(&block, LINE) else {
+        return;
+    };
+
+    source.set(source::insert_line(
+        &source.get_untracked(),
+        line,
+        &source::as_title(NEW_TITLE),
+    ));
+
+    rerender(Some(line));
+
+    // Select the placeholder rather than leaving a caret beside it: the point
+    // of adding a title is to type one.
+    if let Some(title) = block_at(document, line) {
+        select_contents(document, &title);
+    }
+}
+
+/// Takes the title away from the focused block.
+pub fn remove_title<R>(document: &Document, source: RwSignal<String>, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let Some(block) = focused(document) else {
+        return;
+    };
+    let Some(line) = title_line_of(&block) else {
+        return;
+    };
+
+    source.set(source::remove_line(&source.get_untracked(), line));
+
+    // The block itself has moved up into the line the title occupied.
+    rerender(Some(line));
+}
+
+/// Indents or outdents the focused list item, as tab does.
+pub fn reindent_focused(document: &Document, source: RwSignal<String>, outdent: bool) {
+    let (Some(block), Some(content)) = (focused(document), content_of(document)) else {
+        return;
+    };
+    if !is_list(&block) {
+        return;
+    }
+
+    reindent(document, outdent);
+    sync_block(&block, &content, source);
+}
+
+fn focused(document: &Document) -> Option<Element> {
+    document
+        .active_element()
+        .filter(|block| block.has_attribute(LINE))
+}
+
+fn block_at(document: &Document, line: usize) -> Option<Element> {
+    content_of(document)?
+        .query_selector(&format!("[{LINE}=\"{line}\"]"))
+        .ok()?
+}
+
+fn content_of(document: &Document) -> Option<Element> {
+    document.get_element_by_id("content")
+}
+
+/// Focuses `element` with all of its text selected.
+fn select_contents(document: &Document, element: &Element) -> Option<()> {
+    let html: &web_sys::HtmlElement = element.unchecked_ref();
+    let _ = html.focus();
+
+    let selection = document.get_selection().ok()??;
+    let range = document.create_range().ok()?;
+    range.select_node_contents(element).ok()?;
+    selection.remove_all_ranges().ok()?;
+    selection.add_range(&range).ok()?;
+    Some(())
 }
 
 /// Splits a paragraph at the caret, or starts a new paragraph after a heading.
