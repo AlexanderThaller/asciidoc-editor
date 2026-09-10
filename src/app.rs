@@ -10,6 +10,10 @@ use crate::{highlight, render, storage, sync, wysiwyg};
 
 const SAMPLE: &str = include_str!("../assets/sample.adoc");
 
+/// Toolbar heading buttons. `=` is the document title in AsciiDoc, so the
+/// largest heading a body author writes is `==`.
+const HEADINGS: [(&str, usize); 3] = [("H1", 2), ("H2", 3), ("H3", 4)];
+
 /// Re-rendering on every keystroke is wasteful; this is short enough to feel live.
 const RENDER_DEBOUNCE: Duration = Duration::from_millis(150);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -50,7 +54,7 @@ pub fn App() -> impl IntoView {
 
     // The block being edited in place, if any. While it is set the preview is
     // left alone: re-rendering under a live caret would destroy it.
-    let editing = RwSignal::new(None::<usize>);
+    let editing = RwSignal::new(None::<wysiwyg::Block>);
 
     let render_timer = StoredValue::new(None::<TimeoutHandle>);
     let save_timer = StoredValue::new(None::<TimeoutHandle>);
@@ -76,6 +80,14 @@ pub fn App() -> impl IntoView {
             .set_value(set_timeout_with_handle(move || storage::save(&current), AUTOSAVE_DEBOUNCE).ok());
     });
 
+    // A toolbar click must not take focus away from the block being edited,
+    // hence `prevent_default` on mousedown at every button below.
+    let apply_format = move |command: &'static str| {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::format(&document, command);
+        }
+    };
+
     // Renders the current source into the preview. Given a line, the caret is
     // placed in the block that came from it — how the rich-text surface moves
     // the caret across a re-render.
@@ -96,6 +108,12 @@ pub fn App() -> impl IntoView {
         }
 
         warnings.set(warns);
+    };
+
+    let apply_level = move |level: Option<usize>| {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::set_level(&document, source, level, &rerender);
+        }
     };
 
     // Render whenever the source settles, the mode changes, or the iframe
@@ -138,6 +156,67 @@ pub fn App() -> impl IntoView {
                     "Source"
                 </button>
             </div>
+
+            <Show when=move || mode.get() == Mode::Rich>
+                <span class="separator"></span>
+                <div class="tools">
+                    <button
+                        class="button icon"
+                        title="Bold (ctrl+B)"
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_format("bold")
+                    >
+                        <b>"B"</b>
+                    </button>
+                    <button
+                        class="button icon"
+                        title="Italic (ctrl+I)"
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_format("italic")
+                    >
+                        <i>"I"</i>
+                    </button>
+                    <button
+                        class="button icon"
+                        title="Monospace (ctrl+E)"
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_format("code")
+                    >
+                        <code>"<>"</code>
+                    </button>
+                </div>
+
+                <span class="separator"></span>
+                <div class="tools">
+                    <button
+                        class="button"
+                        title="Body text"
+                        class:active=move || editing.get().is_some_and(|block| block.level == 0)
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_level(None)
+                    >
+                        "Body"
+                    </button>
+                    {HEADINGS
+                        .iter()
+                        .map(|(label, level)| {
+                            view! {
+                                <button
+                                    class="button"
+                                    title=format!("Heading ({} in AsciiDoc)", "=".repeat(*level))
+                                    class:active=move || {
+                                        editing.get().is_some_and(|block| block.level == *level)
+                                    }
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_level(Some(*level))
+                                >
+                                    {*label}
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                </div>
+            </Show>
 
             <div class="spacer"></div>
             <label class="button">

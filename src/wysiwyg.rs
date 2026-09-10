@@ -31,6 +31,14 @@ use crate::{
     source::{self, LineRange},
 };
 
+/// The block the caret is currently in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Block {
+    pub line: usize,
+    /// Heading level, or `0` for body text.
+    pub level: usize,
+}
+
 /// Start line of the source the block was rendered from.
 const LINE: &str = "data-edit-line";
 /// Last line of that source; absent for a block with no source yet.
@@ -143,7 +151,7 @@ pub fn attach<R>(
     document: &Document,
     content: Element,
     source: RwSignal<String>,
-    editing: RwSignal<Option<usize>>,
+    editing: RwSignal<Option<Block>>,
     rerender: R,
 ) where
     R: Fn(Option<usize>) + Clone + 'static,
@@ -158,7 +166,12 @@ pub fn attach<R>(
     };
 
     let on_focus_in = move |ev: Event| {
-        editing.set(editable_target(&ev).and_then(|block| attr(&block, LINE)));
+        editing.set(editable_target(&ev).and_then(|block| {
+            Some(Block {
+                line: attr(&block, LINE)?,
+                level: attr(&block, LEVEL).unwrap_or(0),
+            })
+        }));
     };
 
     let on_focus_out = {
@@ -249,6 +262,31 @@ pub fn format(document: &Document, command: &str) {
     }
 
     let _ = commands.exec_command(command);
+}
+
+/// Re-casts the focused block as a heading of `level`, or as body text.
+///
+/// A paragraph folded into a heading loses its line breaks — a heading is a
+/// single line — so this always re-renders rather than trying to patch the
+/// existing DOM.
+pub fn set_level<R>(document: &Document, source: RwSignal<String>, level: Option<usize>, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let Some(block) = document.active_element().filter(|block| block.has_attribute(LINE)) else {
+        return;
+    };
+    let Some(start) = attr(&block, LINE) else { return };
+    let end = attr(&block, END).unwrap_or(start);
+
+    let text = source::as_block(&serialize(&block), level);
+    source.set(source::replace(
+        &source.get_untracked(),
+        LineRange { start, end },
+        &text,
+    ));
+
+    rerender(Some(start));
 }
 
 /// Splits a paragraph at the caret, or starts a new paragraph after a heading.
