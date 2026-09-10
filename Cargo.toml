@@ -1,0 +1,22 @@
+[package]
+name = "asciidoc-editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+asciidoc-html5 = "0.2.2"
+console_error_panic_hook = "0.1.7"
+js-sys = "0.3.105"
+leptos = { version = "0.8.20", features = ["csr"] }
+regex = "1.13.1"
+wasm-bindgen = "0.2.128"
+web-sys = { version = "0.3.105", features = ["HtmlIFrameElement", "HtmlTextAreaElement", "HtmlAnchorElement", "HtmlInputElement", "Document", "Element", "HtmlElement", "Window", "Storage", "Blob", "BlobPropertyBag", "Url", "File", "FileList", "FileReader", "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition", "DomTokenList", "CssStyleDeclaration", "Event", "MouseEvent", "EventTarget", "NodeList", "console"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -1,0 +1,47 @@
+= AsciiDoc Editor
+:toc: left
+:icons: font
+:source-highlighter: highlight.js
+
+A Rust + WebAssembly editor built on the `asciidoc-parser` and `asciidoc-html5`
+crates. Everything you type is parsed and rendered *in the browser* — there is
+no server.
+
+== Getting started
+
+Edit the source on the left; the preview updates as you pause. Click any block
+in the preview to jump the caret to the line that produced it.
+
+.Things that work
+* Live preview with `data-source-line` scroll sync
+* Syntax highlighting in the editor pane
+* Autosave to local storage, import and export
+
+== Blocks
+
+[source,rust]
+----
+fn main() {
+    let html = asciidoc_html5::convert("= Hi\n\nThere.");
+    println!("{html}");
+}
+----
+
+NOTE: Warnings from the parser appear in the status bar below.
+
+.A table
+[cols="1,2"]
+|===
+| Crate | Role
+
+| asciidoc-parser
+| Parses AsciiDoc into a document model
+
+| asciidoc-html5
+| Renders that model as Asciidoctor-compatible HTML5
+|===
+
+[quote,Eric Scouten]
+____
+Spec-driven development against the AsciiDoc language specification.
+____
