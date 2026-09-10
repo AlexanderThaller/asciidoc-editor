@@ -65,6 +65,47 @@ pub fn list_marker(line: &str) -> Option<&str> {
     (rest.starts_with(' ') && !rest.trim().is_empty()).then_some(marker)
 }
 
+/// Whether the line is a block title (`.Title`).
+pub fn is_block_title(line: &str) -> bool {
+    line.starts_with('.')
+        && !line.starts_with("..")
+        && list_marker(line).is_none()
+        && line.len() > 1
+}
+
+/// The line holding the title attached to the block starting at `start`.
+///
+/// A title sits with the block's attribute lines, above its content, and the
+/// recorded line points at whichever of those comes first.
+pub fn block_title_line(src: &str, start: usize) -> Option<usize> {
+    for line_number in start..start + 4 {
+        let line = text_of(src, LineRange::single(line_number));
+
+        if is_block_title(&line) {
+            return Some(line_number);
+        }
+
+        // Anything that is not an attached line is the block's content, and
+        // the title cannot be below that.
+        let attached = line.starts_with('[') && line.trim_end().ends_with(']');
+        if !attached {
+            return None;
+        }
+    }
+
+    None
+}
+
+/// The text of a block title line, without its leading dot.
+pub fn block_title_text(line: &str) -> &str {
+    line.strip_prefix('.').unwrap_or(line)
+}
+
+/// Writes `text` back as a block title. Titles occupy a single line.
+pub fn as_title(text: &str) -> String {
+    format!(".{}", text.replace('\n', " ").trim())
+}
+
 /// The lines of the list rendered from the block starting at `start`.
 ///
 /// The block's recorded line may point at a title or attribute line attached
@@ -273,6 +314,41 @@ mod tests {
     #[test]
     fn inserts_a_block_past_the_end() {
         assert_eq!(insert_block("a\n", 99, "b"), "a\n\nb\n");
+    }
+
+    #[test]
+    fn recognises_block_titles() {
+        assert!(is_block_title(".Things that work"));
+        assert!(!is_block_title(". a list item"));
+        assert!(!is_block_title("...."), "a delimiter");
+        assert!(!is_block_title("..nested title"));
+        assert!(!is_block_title("."));
+        assert!(!is_block_title("Body text"));
+    }
+
+    #[test]
+    fn finds_a_title_above_its_block() {
+        let doc = "= T\n\n.A table\n[cols=\"1,2\"]\n|===\n| a\n|===\n";
+
+        // Recorded line is the title itself.
+        assert_eq!(block_title_line(doc, 3), Some(3));
+        // Or an attribute line above it.
+        let attrs_first = "= T\n\n[cols=\"1,2\"]\n.A table\n|===\n";
+        assert_eq!(block_title_line(attrs_first, 3), Some(4));
+    }
+
+    #[test]
+    fn finds_no_title_when_there_is_none() {
+        assert_eq!(block_title_line("= T\n\nJust a paragraph\n", 3), None);
+        assert_eq!(block_title_line("= T\n\nNOTE: an admonition\n", 3), None);
+        assert_eq!(block_title_line("= T\n\n", 3), None);
+    }
+
+    #[test]
+    fn writes_titles_back() {
+        assert_eq!(block_title_text(".A table"), "A table");
+        assert_eq!(as_title("A table"), ".A table");
+        assert_eq!(as_title(" folded\nover lines "), ".folded over lines");
     }
 
     #[test]

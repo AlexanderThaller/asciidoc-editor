@@ -205,6 +205,9 @@ pub fn App() -> impl IntoView {
                     <button
                         class="button icon"
                         title="Bulleted list"
+                        disabled=move || {
+                            editing.get().map(|block| block.kind) == Some(wysiwyg::Kind::Title)
+                        }
                         class:active=move || {
                             editing.get().map(|block| block.kind)
                                 == Some(wysiwyg::Kind::List { ordered: false })
@@ -217,6 +220,9 @@ pub fn App() -> impl IntoView {
                     <button
                         class="button icon"
                         title="Numbered list"
+                        disabled=move || {
+                            editing.get().map(|block| block.kind) == Some(wysiwyg::Kind::Title)
+                        }
                         class:active=move || {
                             editing.get().map(|block| block.kind)
                                 == Some(wysiwyg::Kind::List { ordered: true })
@@ -235,7 +241,10 @@ pub fn App() -> impl IntoView {
                         title="Body text"
                         disabled=move || {
                             editing.get().is_some_and(|block| {
-                                matches!(block.kind, wysiwyg::Kind::List { .. })
+                                matches!(
+                                    block.kind,
+                                    wysiwyg::Kind::List { .. } | wysiwyg::Kind::Title
+                                )
                             })
                         }
                         class:active=move || {
@@ -255,7 +264,10 @@ pub fn App() -> impl IntoView {
                                     title=format!("Heading ({} in AsciiDoc)", "=".repeat(*level))
                                     disabled=move || {
                                         editing.get().is_some_and(|block| {
-                                            matches!(block.kind, wysiwyg::Kind::List { .. })
+                                            matches!(
+                                                block.kind,
+                                                wysiwyg::Kind::List { .. } | wysiwyg::Kind::Title
+                                            )
                                         })
                                     }
                                     class:active=move || {

@@ -43,7 +43,11 @@ pub struct Block {
 pub enum Kind {
     Body,
     Heading(usize),
-    List { ordered: bool },
+    List {
+        ordered: bool,
+    },
+    /// The title attached to a block, such as `.Things that work`.
+    Title,
 }
 
 /// Start line of the source the block was rendered from.
@@ -54,6 +58,10 @@ const END: &str = "data-edit-end";
 const LEVEL: &str = "data-edit-level";
 /// The list marker the source uses, so that editing preserves its style.
 const MARKER: &str = "data-edit-marker";
+/// Marks a block title, whose source line carries a leading dot.
+const TITLE: &str = "data-edit-title";
+/// Text the renderer generates in front of a title, such as a table's number.
+const PREFIX: &str = "data-edit-prefix";
 
 /// Explains why a block that looks editable is not.
 const REFUSED: &str = "This block can only be edited in source mode";
@@ -66,7 +74,7 @@ pub fn mark_editable(content: &Element, src: &str) {
         };
 
         let range = source::paragraph_range(src, line);
-        offer(&paragraph, range, 0, &source::text_of(src, range));
+        offer(&paragraph, range, Kind::Body, &source::text_of(src, range));
     }
 
     for level in 1..=6 {
@@ -80,7 +88,7 @@ pub fn mark_editable(content: &Element, src: &str) {
                 offer(
                     &heading,
                     LineRange::single(line),
-                    level,
+                    Kind::Heading(level),
                     source::heading_text(&title),
                 );
             }
@@ -119,7 +127,37 @@ pub fn mark_editable(content: &Element, src: &str) {
             let _ = items.set_attribute(MARKER, marker);
         }
 
-        offer(&items, range, 0, &source::text_of(src, range));
+        offer(&items, range, Kind::Body, &source::text_of(src, range));
+    }
+
+    for block in select(content, "[data-source-line]") {
+        let (Some(line), Ok(Some(title))) =
+            (line_of(&block), block.query_selector(":scope > .title"))
+        else {
+            continue;
+        };
+
+        // Only a title the source actually writes can be edited: a `Note`
+        // label or a figure caption the renderer invents has no line to
+        // write back to.
+        let Some(title_line) = source::block_title_line(src, line) else {
+            continue;
+        };
+
+        let range = LineRange::single(title_line);
+        let written = source::block_title_text(&source::text_of(src, range)).to_string();
+
+        // A table numbers its caption, so what is rendered may carry a prefix
+        // that is not in the source and must not be written back into it.
+        let prefix = serialize(&title)
+            .strip_suffix(written.trim_end())
+            .unwrap_or_default()
+            .to_string();
+        if !prefix.is_empty() {
+            let _ = title.set_attribute(PREFIX, &prefix);
+        }
+
+        offer(&title, range, Kind::Title, &format!("{prefix}{written}"));
     }
 
     // The document title is rendered from the header rather than from a block,
@@ -133,7 +171,7 @@ pub fn mark_editable(content: &Element, src: &str) {
         offer(
             &title,
             range,
-            1,
+            Kind::Heading(1),
             source::heading_text(&source::text_of(src, range)),
         );
     }
@@ -141,9 +179,9 @@ pub fn mark_editable(content: &Element, src: &str) {
 
 /// Makes `element` editable if it survives the round trip, and says why not
 /// when it does not.
-fn offer(element: &Element, range: LineRange, level: usize, expected: &str) {
+fn offer(element: &Element, range: LineRange, kind: Kind, expected: &str) {
     if round_trips(element, expected) {
-        make_editable(element, range, level);
+        make_editable(element, range, kind);
     } else {
         let _ = element.set_attribute("title", REFUSED);
     }
@@ -161,11 +199,20 @@ fn round_trips(element: &Element, expected: &str) -> bool {
     serialize(element) == expected.trim_end()
 }
 
-fn make_editable(element: &Element, range: LineRange, level: usize) {
+fn make_editable(element: &Element, range: LineRange, kind: Kind) {
     let _ = element.set_attribute("contenteditable", "true");
     let _ = element.set_attribute(LINE, &range.start.to_string());
     let _ = element.set_attribute(END, &range.end.to_string());
-    let _ = element.set_attribute(LEVEL, &level.to_string());
+
+    match kind {
+        Kind::Heading(level) => {
+            let _ = element.set_attribute(LEVEL, &level.to_string());
+        }
+        Kind::Title => {
+            let _ = element.set_attribute(TITLE, "true");
+        }
+        _ => {}
+    }
 }
 
 /// The block's content as AsciiDoc.
@@ -185,6 +232,10 @@ fn serialize(element: &Element) -> String {
 }
 
 fn kind_of(block: &Element) -> Kind {
+    if block.has_attribute(TITLE) {
+        return Kind::Title;
+    }
+
     if is_list(block) {
         return Kind::List {
             ordered: block.tag_name().eq_ignore_ascii_case("ol"),
@@ -214,8 +265,17 @@ pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) 
     let Some(start) = attr(block, LINE) else {
         return;
     };
-    let level = attr(block, LEVEL).unwrap_or(0);
-    let text = source::as_block(&serialize(block), (level > 0).then_some(level));
+    let text = match kind_of(block) {
+        Kind::Title => {
+            let written = serialize(block);
+            // Drop the generated prefix again. If the caret wandered into it
+            // there is nothing to strip, and what the user typed is used whole.
+            let prefix = block.get_attribute(PREFIX).unwrap_or_default();
+            source::as_title(written.strip_prefix(&prefix).unwrap_or(&written))
+        }
+        Kind::Heading(level) => source::as_block(&serialize(block), Some(level)),
+        _ => serialize(block),
+    };
 
     let added = text.split('\n').count();
     let (edited, removed) = match attr(block, END) {
@@ -609,7 +669,7 @@ pub fn set_list<R>(
 {
     let Some(block) = document
         .active_element()
-        .filter(|block| block.has_attribute(LINE))
+        .filter(|block| block.has_attribute(LINE) && !block.has_attribute(TITLE))
     else {
         return;
     };
@@ -643,6 +703,12 @@ fn split_block<R>(
     };
     let end = attr(block, END).unwrap_or(start);
     let text = serialize(block);
+
+    // A title belongs to the block below it; splitting it would put a stray
+    // paragraph between the two.
+    if kind_of(block) == Kind::Title {
+        return;
+    }
 
     // Splitting a heading would produce a second heading; a new paragraph
     // under it is what pressing Enter there is actually asking for.
