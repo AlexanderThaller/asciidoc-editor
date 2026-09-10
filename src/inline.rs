@@ -30,7 +30,11 @@ pub fn to_asciidoc(nodes: &[Inline]) -> String {
 
     for node in nodes {
         match node {
-            Inline::Text(text) => out.push_str(text),
+            // Browsers pad an edit with non-breaking spaces to hold the
+            // spacing around it. They look like spaces, so writing them into
+            // the source leaves invisible characters that AsciiDoc does not
+            // treat as word boundaries.
+            Inline::Text(text) => out.push_str(&text.replace('\u{a0}', " ")),
             Inline::Strong(children) => wrap(&mut out, "*", children),
             Inline::Emphasis(children) => wrap(&mut out, "_", children),
             Inline::Code(children) => wrap(&mut out, "`", children),
@@ -105,6 +109,14 @@ fn visit(node: &Node, out: &mut Vec<Inline>) {
             // Cast unchecked: nodes from the preview iframe belong to its own
             // realm, where an `instanceof` check would fail.
             let element: &Element = node.unchecked_ref();
+
+            // A block title is a label the renderer places inside the block —
+            // an admonition keeps one in the same cell as its text — and is
+            // written back from its own line, not as part of this content.
+            if element.class_list().contains("title") {
+                return;
+            }
+
             let mut children = Vec::new();
             collect(node, &mut children);
 
@@ -178,6 +190,17 @@ mod tests {
 
         assert_eq!(to_asciidoc(&[bare]), "https://example.com");
         assert_eq!(to_asciidoc(&[labelled]), "https://example.com[Example]");
+    }
+
+    #[test]
+    fn normalises_non_breaking_spaces() {
+        let padded = vec![
+            text("before\u{a0}"),
+            Inline::Code(vec![text("x")]),
+            text("\u{a0}after"),
+        ];
+
+        assert_eq!(to_asciidoc(&padded), "before `x` after");
     }
 
     #[test]

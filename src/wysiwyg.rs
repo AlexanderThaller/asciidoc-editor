@@ -159,15 +159,46 @@ pub fn mark_editable(content: &Element, src: &str) {
         };
 
         let _ = body.set_attribute(LEAD, lead);
+
+        // A title sits in the same cell as the text, and the browser treats
+        // that cell as one editing host — a nested `contenteditable` inside it
+        // is not a second one. So the cell owns the title's line as well, and
+        // writes both back together.
+        let range = match block_title_in(&body) {
+            Some(title) if source::block_title_line(src, line) == Some(range.start - 1) => {
+                let written = source::text_of(src, LineRange::single(range.start - 1));
+                if title.text_content().unwrap_or_default() != source::block_title_text(&written) {
+                    continue;
+                }
+                LineRange {
+                    start: range.start - 1,
+                    end: range.end,
+                }
+            }
+            _ => range,
+        };
+
         offer(&body, range, Kind::Admonition(label), &text[lead.len()..]);
     }
 
     for block in select(content, "[data-source-line]") {
         let (Some(line), Ok(Some(title))) =
-            (line_of(&block), block.query_selector(":scope > .title"))
+            // An admonition keeps its title inside the content cell rather
+            // than beside it.
+            (
+                line_of(&block),
+                block.query_selector(":scope > .title, :scope td.content > .title"),
+            )
         else {
             continue;
         };
+
+        // A title inside a block that is already editable is edited through
+        // that block; marking it again would nest one editing host in
+        // another, which the browser does not honour.
+        if title.closest(&format!("[{LINE}]")).ok().flatten().is_some() {
+            continue;
+        }
 
         // Only a title the source actually writes can be edited: a `Note`
         // label or a figure caption the renderer invents has no line to
@@ -270,12 +301,32 @@ fn title_line_of(block: &Element) -> Option<usize> {
         return attr(block, LINE);
     }
 
-    let title = block
-        .parent_element()?
-        .query_selector(&format!(":scope > [{TITLE}]"))
-        .ok()??;
+    // A title the block holds itself occupies the block's first line.
+    if block_title_in(block).is_some() {
+        return attr(block, LINE);
+    }
+
+    let beside = block.parent_element().and_then(|parent| {
+        parent
+            .query_selector(&format!(":scope > [{TITLE}]"))
+            .ok()
+            .flatten()
+    });
+
+    // Beside the block for most kinds, inside it for an admonition.
+    let title = beside.or_else(|| {
+        block
+            .query_selector(&format!(":scope > [{TITLE}]"))
+            .ok()
+            .flatten()
+    })?;
 
     attr(&title, LINE)
+}
+
+/// The block title a block carries inside itself, as an admonition does.
+fn block_title_in(block: &Element) -> Option<Element> {
+    block.query_selector(":scope > .title").ok()?
 }
 
 fn kind_of(block: &Element) -> Kind {
@@ -328,12 +379,23 @@ pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) 
             source::as_title(written.strip_prefix(&prefix).unwrap_or(&written))
         }
         Kind::Heading(level) => source::as_block(&serialize(block), Some(level)),
-        // The label is part of the source line but not of what is rendered.
-        Kind::Admonition(_) => format!(
-            "{}{}",
-            block.get_attribute(LEAD).unwrap_or_default(),
-            serialize(block)
-        ),
+        // The label is part of the source line but not of what is rendered,
+        // and a title of its own occupies the line above.
+        Kind::Admonition(_) => {
+            let text = format!(
+                "{}{}",
+                block.get_attribute(LEAD).unwrap_or_default(),
+                serialize(block)
+            );
+
+            match block_title_in(block) {
+                Some(title) => format!(
+                    "{}\n{text}",
+                    source::as_title(&title.text_content().unwrap_or_default())
+                ),
+                None => text,
+            }
+        }
         _ => serialize(block),
     };
 
@@ -498,30 +560,64 @@ pub fn attach<R>(
 /// makes it worth keeping here. `styleWithCSS` is turned off so it emits tags
 /// rather than styled spans — tags are what can be written back as AsciiDoc.
 pub fn format(document: &Document, command: &str) {
-    let commands = exec(document, "styleWithCSS", Some("false"));
+    exec(document, "styleWithCSS", Some("false"));
 
     if command == "code" {
-        let Some(selected) = document.get_selection().ok().flatten() else {
-            return;
-        };
-        let text = selected.to_string().as_string().unwrap_or_default();
-        if text.is_empty() {
-            return;
-        }
-
-        let escaped = text
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        let _ = commands.exec_command_with_show_ui_and_value(
-            "insertHTML",
-            false,
-            &format!("<code>{escaped}</code>"),
-        );
+        toggle_code(document);
         return;
     }
 
     exec(document, command, None);
+}
+
+/// Wraps the selection in monospace, or takes the wrapping off again.
+///
+/// `execCommand` has no monospace command, so wrapping writes the markup with
+/// `insertHTML`. Unwrapping cannot do the same in reverse: replacing the
+/// selection with one covering the whole element first makes the following
+/// command a no-op, because a selection set from script is not the selection
+/// `execCommand` acts on. `removeFormat` needs no such help — `code` is one of
+/// the elements it strips — and both directions stay on the browser's undo
+/// stack this way.
+fn toggle_code(document: &Document) -> Option<()> {
+    let selection = document.get_selection().ok()??;
+
+    if enclosing_code(&selection).is_some() {
+        exec(document, "removeFormat", None);
+        return Some(());
+    }
+
+    let text = selection.to_string().as_string().unwrap_or_default();
+    if text.is_empty() {
+        return None;
+    }
+
+    let commands: &HtmlDocument = document.unchecked_ref();
+    let _ = commands.exec_command_with_show_ui_and_value(
+        "insertHTML",
+        false,
+        &format!("<code>{}</code>", escape(&text)),
+    );
+    Some(())
+}
+
+/// The monospace element the selection sits inside, if any.
+fn enclosing_code(selection: &web_sys::Selection) -> Option<Element> {
+    let node = selection.focus_node()?;
+    let element = match node.node_type() {
+        Node::ELEMENT_NODE => node.unchecked_into::<Element>(),
+        _ => node.parent_element()?,
+    };
+
+    // Only within an editable block: the rendering elsewhere is not ours to
+    // rewrite.
+    element.closest(&format!("[{LINE}] code")).ok()?
+}
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Runs an `execCommand`, returning the document it ran against so that a
