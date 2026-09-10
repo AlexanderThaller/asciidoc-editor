@@ -35,10 +35,15 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Block {
     pub line: usize,
-    /// Heading level, or `0` for body text.
-    pub level: usize,
-    /// Whether the block is a list, which cannot become a heading.
-    pub list: bool,
+    pub kind: Kind,
+}
+
+/// What a block is, as far as the toolbar is concerned.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    Body,
+    Heading(usize),
+    List { ordered: bool },
 }
 
 /// Start line of the source the block was rendered from.
@@ -179,6 +184,19 @@ fn serialize(element: &Element) -> String {
         .to_string()
 }
 
+fn kind_of(block: &Element) -> Kind {
+    if is_list(block) {
+        return Kind::List {
+            ordered: block.tag_name().eq_ignore_ascii_case("ol"),
+        };
+    }
+
+    match attr(block, LEVEL).unwrap_or(0) {
+        0 => Kind::Body,
+        level => Kind::Heading(level),
+    }
+}
+
 /// Whether the block is a list, whose items the browser manages itself.
 fn is_list(element: &Element) -> bool {
     matches!(
@@ -271,8 +289,7 @@ pub fn attach<R>(
         editing.set(editable_target(&ev).and_then(|block| {
             Some(Block {
                 line: attr(&block, LINE)?,
-                level: attr(&block, LEVEL).unwrap_or(0),
-                list: is_list(&block),
+                kind: kind_of(&block),
             })
         }));
     };
@@ -572,6 +589,36 @@ pub fn set_level<R>(
     let end = attr(&block, END).unwrap_or(start);
 
     let text = source::as_block(&serialize(&block), level);
+    source.set(source::replace(
+        &source.get_untracked(),
+        LineRange { start, end },
+        &text,
+    ));
+
+    rerender(Some(start));
+}
+
+/// Re-casts the focused block as a list of `marker`, or back into body text.
+pub fn set_list<R>(
+    document: &Document,
+    source: RwSignal<String>,
+    marker: Option<char>,
+    rerender: &R,
+) where
+    R: Fn(Option<usize>),
+{
+    let Some(block) = document
+        .active_element()
+        .filter(|block| block.has_attribute(LINE))
+    else {
+        return;
+    };
+    let Some(start) = attr(&block, LINE) else {
+        return;
+    };
+    let end = attr(&block, END).unwrap_or(start);
+
+    let text = source::as_list(&serialize(&block), marker);
     source.set(source::replace(
         &source.get_untracked(),
         LineRange { start, end },

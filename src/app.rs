@@ -117,6 +117,19 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    // Clicking the kind a block already is turns it back into body text, the
+    // way a list button behaves everywhere else.
+    let apply_list = move |ordered: bool| {
+        let marker = match editing.get_untracked().map(|block| block.kind) {
+            Some(wysiwyg::Kind::List { ordered: current }) if current == ordered => None,
+            _ => Some(if ordered { '.' } else { '*' }),
+        };
+
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::set_list(&document, source, marker, &rerender);
+        }
+    };
+
     // Render whenever the source settles, the mode changes, or the iframe
     // becomes ready.
     Effect::new(move |_| {
@@ -190,11 +203,43 @@ pub fn App() -> impl IntoView {
                 <span class="separator"></span>
                 <div class="tools">
                     <button
+                        class="button icon"
+                        title="Bulleted list"
+                        class:active=move || {
+                            editing.get().map(|block| block.kind)
+                                == Some(wysiwyg::Kind::List { ordered: false })
+                        }
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_list(false)
+                    >
+                        "•"
+                    </button>
+                    <button
+                        class="button icon"
+                        title="Numbered list"
+                        class:active=move || {
+                            editing.get().map(|block| block.kind)
+                                == Some(wysiwyg::Kind::List { ordered: true })
+                        }
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_list(true)
+                    >
+                        "1."
+                    </button>
+                </div>
+
+                <span class="separator"></span>
+                <div class="tools">
+                    <button
                         class="button"
                         title="Body text"
-                        disabled=move || editing.get().is_some_and(|block| block.list)
+                        disabled=move || {
+                            editing.get().is_some_and(|block| {
+                                matches!(block.kind, wysiwyg::Kind::List { .. })
+                            })
+                        }
                         class:active=move || {
-                            editing.get().is_some_and(|block| !block.list && block.level == 0)
+                            editing.get().map(|block| block.kind) == Some(wysiwyg::Kind::Body)
                         }
                         on:mousedown=|ev| ev.prevent_default()
                         on:click=move |_| apply_level(None)
@@ -208,9 +253,14 @@ pub fn App() -> impl IntoView {
                                 <button
                                     class="button"
                                     title=format!("Heading ({} in AsciiDoc)", "=".repeat(*level))
-                                    disabled=move || editing.get().is_some_and(|block| block.list)
+                                    disabled=move || {
+                                        editing.get().is_some_and(|block| {
+                                            matches!(block.kind, wysiwyg::Kind::List { .. })
+                                        })
+                                    }
                                     class:active=move || {
-                                        editing.get().is_some_and(|block| block.level == *level)
+                                        editing.get().map(|block| block.kind)
+                                            == Some(wysiwyg::Kind::Heading(*level))
                                     }
                                     on:mousedown=|ev| ev.prevent_default()
                                     on:click=move |_| apply_level(Some(*level))

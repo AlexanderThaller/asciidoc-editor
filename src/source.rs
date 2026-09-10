@@ -163,6 +163,48 @@ pub fn heading_text(line: &str) -> &str {
     }
 }
 
+/// Re-casts a block as a list of `marker`, or back into body text.
+///
+/// The text may already be a list, in which case its markers are swapped while
+/// nesting depth is kept; otherwise the block becomes a single item. Turning a
+/// list back into body text gives each item its own paragraph.
+pub fn as_list(text: &str, marker: Option<char>) -> String {
+    let was_list = text.lines().any(|line| list_marker(line).is_some());
+
+    let Some(marker) = marker else {
+        if !was_list {
+            return text.to_string();
+        }
+
+        return text
+            .lines()
+            .map(|line| match list_marker(line) {
+                Some(found) => line.trim_start()[found.len()..].trim(),
+                None => line.trim(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+    };
+
+    if !was_list {
+        // A paragraph is one thought, so it becomes one item; its line breaks
+        // are only wrapping and would otherwise split it.
+        return format!("{} {}", marker, text.replace('\n', " ").trim());
+    }
+
+    text.lines()
+        .map(|line| match list_marker(line) {
+            Some(found) => format!(
+                "{} {}",
+                marker.to_string().repeat(found.len()),
+                line.trim_start()[found.len()..].trim()
+            ),
+            None => line.trim().to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Renders `text` as a heading of `level`, or as body text when `None`.
 ///
 /// Headings occupy a single line, so any line breaks in the text are folded
@@ -262,6 +304,33 @@ mod tests {
     #[test]
     fn list_range_needs_at_least_one_item() {
         assert_eq!(list_range("= T\n\nJust a paragraph\n", 3), None);
+    }
+
+    #[test]
+    fn turns_a_paragraph_into_a_single_item() {
+        assert_eq!(as_list("Some text", Some('*')), "* Some text");
+        assert_eq!(
+            as_list("wrapped\nover lines", Some('.')),
+            ". wrapped over lines"
+        );
+    }
+
+    #[test]
+    fn swaps_markers_while_keeping_depth() {
+        let list = "* one\n** nested\n* two";
+
+        assert_eq!(as_list(list, Some('.')), ". one\n.. nested\n. two");
+        assert_eq!(as_list(list, Some('-')), "- one\n-- nested\n- two");
+    }
+
+    #[test]
+    fn turns_a_list_back_into_paragraphs() {
+        assert_eq!(as_list("* one\n* two", None), "one\n\ntwo");
+    }
+
+    #[test]
+    fn leaves_body_text_alone() {
+        assert_eq!(as_list("Some text", None), "Some text");
     }
 
     #[test]
