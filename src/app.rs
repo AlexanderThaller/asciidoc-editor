@@ -192,7 +192,10 @@ pub fn App() -> impl IntoView {
                     <button
                         class="button"
                         title="Body text"
-                        class:active=move || editing.get().is_some_and(|block| block.level == 0)
+                        disabled=move || editing.get().is_some_and(|block| block.list)
+                        class:active=move || {
+                            editing.get().is_some_and(|block| !block.list && block.level == 0)
+                        }
                         on:mousedown=|ev| ev.prevent_default()
                         on:click=move |_| apply_level(None)
                     >
@@ -205,6 +208,7 @@ pub fn App() -> impl IntoView {
                                 <button
                                     class="button"
                                     title=format!("Heading ({} in AsciiDoc)", "=".repeat(*level))
+                                    disabled=move || editing.get().is_some_and(|block| block.list)
                                     class:active=move || {
                                         editing.get().is_some_and(|block| block.level == *level)
                                     }

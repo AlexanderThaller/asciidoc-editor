@@ -43,6 +43,45 @@ pub fn paragraph_range(src: &str, start: usize) -> LineRange {
     LineRange { start, end }
 }
 
+/// The marker a list item line starts with, if it is one.
+///
+/// Repetition carries nesting depth in AsciiDoc (`**` is a second-level item),
+/// so the whole run is returned. `1.`-style numbering is deliberately not
+/// recognised: it cannot be written back without renumbering.
+pub fn list_marker(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let marker = &trimmed[..trimmed
+        .find(|c| !matches!(c, '*' | '-' | '.'))
+        .unwrap_or(trimmed.len())];
+
+    let first = marker.chars().next()?;
+    if !marker.chars().all(|c| c == first) {
+        return None;
+    }
+
+    // A marker is only a marker when something follows it: `.Title` is a block
+    // title and `----` is a delimiter.
+    let rest = &trimmed[marker.len()..];
+    (rest.starts_with(' ') && !rest.trim().is_empty()).then_some(marker)
+}
+
+/// The lines of the list rendered from the block starting at `start`.
+///
+/// The block's recorded line may point at a title or attribute line attached
+/// to the list, neither of which is part of the list itself, so the range
+/// starts at the first actual item.
+pub fn list_range(src: &str, start: usize) -> Option<LineRange> {
+    let block = paragraph_range(src, start);
+
+    let first = (block.start..=block.end)
+        .find(|line| list_marker(&text_of(src, LineRange::single(*line))).is_some())?;
+
+    Some(LineRange {
+        start: first,
+        end: block.end,
+    })
+}
+
 /// The source text of `range`.
 pub fn text_of(src: &str, range: LineRange) -> String {
     src.lines()
@@ -192,6 +231,37 @@ mod tests {
     #[test]
     fn inserts_a_block_past_the_end() {
         assert_eq!(insert_block("a\n", 99, "b"), "a\n\nb\n");
+    }
+
+    #[test]
+    fn recognises_list_markers() {
+        assert_eq!(list_marker("* item"), Some("*"));
+        assert_eq!(list_marker("- item"), Some("-"));
+        assert_eq!(list_marker("** nested"), Some("**"));
+        assert_eq!(list_marker(". step"), Some("."));
+        assert_eq!(list_marker("  * indented"), Some("*"));
+        assert_eq!(
+            list_marker(".Block title"),
+            None,
+            "no space after the marker"
+        );
+        assert_eq!(list_marker("----"), None, "a delimiter, not a marker");
+        assert_eq!(list_marker("*-* mixed"), None);
+        assert_eq!(list_marker("1. numbered"), None, "cannot be written back");
+        assert_eq!(list_marker("text"), None);
+        assert_eq!(list_marker("*  "), None, "a marker with no item text");
+    }
+
+    #[test]
+    fn list_range_skips_an_attached_title() {
+        let doc = "= T\n\n.A title\n* one\n* two\n\nAfter\n";
+
+        assert_eq!(list_range(doc, 3), Some(LineRange { start: 4, end: 5 }));
+    }
+
+    #[test]
+    fn list_range_needs_at_least_one_item() {
+        assert_eq!(list_range("= T\n\nJust a paragraph\n", 3), None);
     }
 
     #[test]

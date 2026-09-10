@@ -72,44 +72,58 @@ pub fn from_node(node: &Node) -> Vec<Inline> {
     out
 }
 
+/// Reads a run of sibling nodes, rather than the children of one parent.
+///
+/// List items mix inline content with nested lists, so their content has to be
+/// read node by node.
+pub fn from_nodes(nodes: &[Node]) -> Vec<Inline> {
+    let mut out = Vec::new();
+    for node in nodes {
+        visit(node, &mut out);
+    }
+    out
+}
+
 fn collect(parent: &Node, out: &mut Vec<Inline>) {
     let children = parent.child_nodes();
 
     for index in 0..children.length() {
-        let Some(node) = children.item(index) else {
-            continue;
-        };
-
-        match node.node_type() {
-            Node::TEXT_NODE => {
-                if let Some(text) = node.text_content() {
-                    out.push(Inline::Text(text));
-                }
-            }
-            Node::ELEMENT_NODE => {
-                // Cast unchecked: nodes from the preview iframe belong to its
-                // own realm, where an `instanceof` check would fail.
-                let element: &Element = node.unchecked_ref();
-                let mut children = Vec::new();
-                collect(&node, &mut children);
-
-                match element.tag_name().to_ascii_uppercase().as_str() {
-                    // `execCommand` emits `b`/`i`; the renderer emits `strong`/`em`.
-                    "STRONG" | "B" => out.push(Inline::Strong(children)),
-                    "EM" | "I" => out.push(Inline::Emphasis(children)),
-                    "CODE" => out.push(Inline::Code(children)),
-                    "BR" => out.push(Inline::LineBreak),
-                    "A" => out.push(Inline::Link {
-                        href: element.get_attribute("href").unwrap_or_default(),
-                        children,
-                    }),
-                    // Unknown wrappers contribute their content but not
-                    // themselves, so a stray `span` cannot break a round trip.
-                    _ => out.extend(children),
-                }
-            }
-            _ => {}
+        if let Some(node) = children.item(index) {
+            visit(&node, out);
         }
+    }
+}
+
+fn visit(node: &Node, out: &mut Vec<Inline>) {
+    match node.node_type() {
+        Node::TEXT_NODE => {
+            if let Some(text) = node.text_content() {
+                out.push(Inline::Text(text));
+            }
+        }
+        Node::ELEMENT_NODE => {
+            // Cast unchecked: nodes from the preview iframe belong to its own
+            // realm, where an `instanceof` check would fail.
+            let element: &Element = node.unchecked_ref();
+            let mut children = Vec::new();
+            collect(node, &mut children);
+
+            match element.tag_name().to_ascii_uppercase().as_str() {
+                // `execCommand` emits `b`/`i`; the renderer emits `strong`/`em`.
+                "STRONG" | "B" => out.push(Inline::Strong(children)),
+                "EM" | "I" => out.push(Inline::Emphasis(children)),
+                "CODE" => out.push(Inline::Code(children)),
+                "BR" => out.push(Inline::LineBreak),
+                "A" => out.push(Inline::Link {
+                    href: element.get_attribute("href").unwrap_or_default(),
+                    children,
+                }),
+                // Unknown wrappers contribute their content but not themselves,
+                // so a stray `span` cannot break a round trip.
+                _ => out.extend(children),
+            }
+        }
+        _ => {}
     }
 }
 

@@ -27,7 +27,7 @@ use wasm_bindgen::{JsCast, convert::FromWasmAbi, prelude::Closure};
 use web_sys::{Document, Element, Event, HtmlDocument, KeyboardEvent, Node};
 
 use crate::{
-    inline,
+    inline, list,
     source::{self, LineRange},
 };
 
@@ -37,6 +37,8 @@ pub struct Block {
     pub line: usize,
     /// Heading level, or `0` for body text.
     pub level: usize,
+    /// Whether the block is a list, which cannot become a heading.
+    pub list: bool,
 }
 
 /// Start line of the source the block was rendered from.
@@ -45,6 +47,8 @@ const LINE: &str = "data-edit-line";
 const END: &str = "data-edit-end";
 /// Heading level, or `0` for body text.
 const LEVEL: &str = "data-edit-level";
+/// The list marker the source uses, so that editing preserves its style.
+const MARKER: &str = "data-edit-marker";
 
 /// Explains why a block that looks editable is not.
 const REFUSED: &str = "This block can only be edited in source mode";
@@ -76,6 +80,41 @@ pub fn mark_editable(content: &Element, src: &str) {
                 );
             }
         }
+    }
+
+    for block in select(
+        content,
+        "div.ulist[data-source-line], div.olist[data-source-line]",
+    ) {
+        let (Some(line), Ok(Some(items))) = (line_of(&block), block.query_selector("ul, ol"))
+        else {
+            continue;
+        };
+
+        // A nested list is edited through the list that contains it: on its
+        // own it has no idea how deep it sits, so it could not write its
+        // items back with the right number of markers.
+        if items
+            .parent_element()
+            .and_then(|parent| parent.closest("ul, ol").ok().flatten())
+            .is_some()
+        {
+            continue;
+        }
+
+        let Some(range) = source::list_range(src, line) else {
+            continue;
+        };
+
+        // Recorded before the round trip is checked, because writing the list
+        // back out reads the marker from here.
+        if let Some(marker) =
+            source::list_marker(&source::text_of(src, LineRange::single(range.start)))
+        {
+            let _ = items.set_attribute(MARKER, marker);
+        }
+
+        offer(&items, range, 0, &source::text_of(src, range));
     }
 
     // The document title is rendered from the header rather than from a block,
@@ -126,9 +165,26 @@ fn make_editable(element: &Element, range: LineRange, level: usize) {
 
 /// The block's content as AsciiDoc.
 fn serialize(element: &Element) -> String {
+    if let Some(items) = list::from_element(element) {
+        let marker = element
+            .get_attribute(MARKER)
+            .and_then(|marker| marker.chars().next())
+            .unwrap_or('*');
+
+        return list::to_asciidoc(&items, marker);
+    }
+
     inline::to_asciidoc(&inline::from_node(element))
         .trim()
         .to_string()
+}
+
+/// Whether the block is a list, whose items the browser manages itself.
+fn is_list(element: &Element) -> bool {
+    matches!(
+        element.tag_name().to_ascii_uppercase().as_str(),
+        "UL" | "OL"
+    )
 }
 
 /// Writes an edited block back into the source.
@@ -216,6 +272,7 @@ pub fn attach<R>(
             Some(Block {
                 line: attr(&block, LINE)?,
                 level: attr(&block, LEVEL).unwrap_or(0),
+                list: is_list(&block),
             })
         }));
     };
@@ -254,6 +311,13 @@ pub fn attach<R>(
             };
 
             if ev.key() == "Enter" && !ev.shift_key() {
+                // A list handles Enter far better than we could: the browser
+                // starts a new item, and the input that follows writes the
+                // whole list back out.
+                if is_list(&block) {
+                    return;
+                }
+
                 ev.prevent_default();
                 split_block(&document, &content, &block, source, &rerender);
                 return;

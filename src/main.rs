@@ -1,6 +1,7 @@
 mod app;
 mod highlight;
 mod inline;
+mod list;
 mod render;
 mod source;
 mod storage;
