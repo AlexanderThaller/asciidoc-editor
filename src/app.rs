@@ -6,7 +6,7 @@ use leptos::{html, prelude::*};
 use wasm_bindgen::{JsCast, prelude::Closure};
 use web_sys::{Element, Event, HtmlIFrameElement, HtmlInputElement, HtmlTextAreaElement, Node};
 
-use crate::{highlight, render, storage, sync};
+use crate::{highlight, render, storage, sync, wysiwyg};
 
 const SAMPLE: &str = include_str!("../assets/sample.adoc");
 
@@ -18,7 +18,12 @@ const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// `srcdoc` would reload it and throw away the scroll position on every render.
 const PREVIEW_SHELL: &str = r#"<!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="/assets/asciidoctor-default.css">
-<style>body{margin:0;padding:1.25rem 1.5rem}</style></head>
+<style>
+body{margin:0;padding:1.25rem 1.5rem}
+[data-edit-line]{border-radius:3px}
+[data-edit-line]:hover{background:rgba(127,180,255,.08)}
+[data-edit-line]:focus{outline:2px solid rgba(127,180,255,.5);outline-offset:4px}
+</style></head>
 <body class="article"><div id="content"></div></body></html>"#;
 
 /// Which surface the document is edited through.
@@ -42,6 +47,10 @@ pub fn App() -> impl IntoView {
     let textarea = NodeRef::<html::Textarea>::new();
     let overlay = NodeRef::<html::Pre>::new();
     let frame = NodeRef::<html::Iframe>::new();
+
+    // The block being edited in place, if any. While it is set the preview is
+    // left alone: re-rendering under a live caret would destroy it.
+    let editing = RwSignal::new(None::<usize>);
 
     let render_timer = StoredValue::new(None::<TimeoutHandle>);
     let save_timer = StoredValue::new(None::<TimeoutHandle>);
@@ -67,25 +76,46 @@ pub fn App() -> impl IntoView {
             .set_value(set_timeout_with_handle(move || storage::save(&current), AUTOSAVE_DEBOUNCE).ok());
     });
 
-    // Render whenever the source settles and the iframe is ready to receive it.
+    // Renders the current source into the preview. Given a line, the caret is
+    // placed in the block that came from it — how the rich-text surface moves
+    // the caret across a re-render.
+    let rerender = move |focus_line: Option<usize>| {
+        let src = source.get_untracked();
+        let (html, warns) = render::render(&src);
+
+        if let Some(content) = preview_content(frame) {
+            content.set_inner_html(&html);
+
+            if mode.get_untracked() == Mode::Rich {
+                wysiwyg::mark_editable(&content, &src);
+            }
+
+            if let Some(line) = focus_line {
+                focus_block(frame, &content, line);
+            }
+        }
+
+        warnings.set(warns);
+    };
+
+    // Render whenever the source settles, the mode changes, or the iframe
+    // becomes ready.
     Effect::new(move |_| {
-        let src = settled.get();
-        if !preview_ready.get() {
+        settled.track();
+        mode.track();
+        if !preview_ready.get() || editing.get_untracked().is_some() {
             return;
         }
 
-        let (html, warns) = render::render(&src);
-        if let Some(content) = preview_content(frame) {
-            content.set_inner_html(&html);
-            // The new DOM has new scroll targets, so a sync from before the
-            // render is stale. Re-follow the caret, but only while the user is
-            // actually typing — otherwise this would yank the preview away
-            // from someone who is just reading it.
-            if editor_has_focus(textarea) {
-                sync_cursor(textarea, frame, source, last_line, Force::Yes);
-            }
+        rerender(None);
+
+        // The new DOM has new scroll targets, so a sync from before the render
+        // is stale. Re-follow the caret, but only while the user is actually
+        // typing — otherwise this would yank the preview away from someone who
+        // is just reading it.
+        if editor_has_focus(textarea) {
+            sync_cursor(textarea, frame, source, last_line, Force::Yes);
         }
-        warnings.set(warns);
     });
 
     view! {
@@ -170,7 +200,14 @@ pub fn App() -> impl IntoView {
                     node_ref=frame
                     srcdoc=PREVIEW_SHELL
                     on:load=move |_| {
-                        attach_click_to_locate(frame, textarea, source);
+                        attach_click_to_locate(frame, textarea, source, mode);
+
+                        if let (Some(document), Some(content)) =
+                            (preview_document(frame), preview_content(frame))
+                        {
+                            wysiwyg::attach(&document, content, source, editing, rerender);
+                        }
+
                         preview_ready.set(true);
                     }
                 />
@@ -195,6 +232,23 @@ pub fn App() -> impl IntoView {
             }}
         </footer>
     }
+}
+
+/// Puts the caret in the block rendered from `line`.
+fn focus_block(frame: NodeRef<html::Iframe>, content: &Element, line: usize) {
+    let (Some(document), Ok(Some(block))) = (
+        preview_document(frame),
+        content.query_selector(&format!("[data-edit-line=\"{line}\"]")),
+    ) else {
+        return;
+    };
+
+    wysiwyg::focus(&document, &block);
+}
+
+/// The document inside the preview iframe.
+fn preview_document(frame: NodeRef<html::Iframe>) -> Option<web_sys::Document> {
+    frame.get_untracked()?.content_document()
 }
 
 /// The `#content` div inside the preview iframe.
@@ -248,12 +302,19 @@ fn attach_click_to_locate(
     frame: NodeRef<html::Iframe>,
     textarea: NodeRef<html::Textarea>,
     source: RwSignal<String>,
+    mode: RwSignal<Mode>,
 ) {
     let Some(document) = frame.get_untracked().and_then(|f| f.content_document()) else {
         return;
     };
 
     let on_click = Closure::<dyn FnMut(Event)>::new(move |ev: Event| {
+        // In rich-text mode a click is placing the caret for editing, not
+        // asking to jump to the source.
+        if mode.get_untracked() == Mode::Rich {
+            return;
+        }
+
         // `dyn_into` would test `instanceof` against *this* realm's `Element`,
         // and nodes from inside the iframe belong to the iframe's realm — the
         // cast always fails. Check the node type instead and cast unchecked.
