@@ -323,6 +323,17 @@ pub fn attach<R>(
                 return;
             }
 
+            if ev.key() == "Tab" && is_list(&block) {
+                // Swallowed either way: tab has no business moving focus out
+                // of the document while a list is being edited.
+                ev.prevent_default();
+                reindent(&document, ev.shift_key());
+                // Moving nodes fires no input event, so the write-back that
+                // normally follows an edit has to be asked for.
+                sync_block(&block, &content, source);
+                return;
+            }
+
             if ev.ctrl_key() || ev.meta_key() {
                 let command = match ev.key().to_ascii_lowercase().as_str() {
                     "b" => "bold",
@@ -349,9 +360,7 @@ pub fn attach<R>(
 /// makes it worth keeping here. `styleWithCSS` is turned off so it emits tags
 /// rather than styled spans — tags are what can be written back as AsciiDoc.
 pub fn format(document: &Document, command: &str) {
-    // `execCommand` hangs off `HTMLDocument` rather than `Document`.
-    let commands: &HtmlDocument = document.unchecked_ref();
-    let _ = commands.exec_command_with_show_ui_and_value("styleWithCSS", false, "false");
+    let commands = exec(document, "styleWithCSS", Some("false"));
 
     if command == "code" {
         let Some(selected) = document.get_selection().ok().flatten() else {
@@ -374,7 +383,168 @@ pub fn format(document: &Document, command: &str) {
         return;
     }
 
-    let _ = commands.exec_command(command);
+    exec(document, command, None);
+}
+
+/// Runs an `execCommand`, returning the document it ran against so that a
+/// caller can chain another one.
+///
+/// `execCommand` hangs off `HTMLDocument` rather than `Document`.
+fn exec<'a>(document: &'a Document, command: &str, value: Option<&str>) -> &'a HtmlDocument {
+    let commands: &HtmlDocument = document.unchecked_ref();
+    let _ = commands.exec_command_with_show_ui_and_value(command, false, value.unwrap_or(""));
+    commands
+}
+
+/// Moves the list item holding the caret one level deeper, or shallower.
+///
+/// The browser cannot help here: `execCommand("indent")` refuses to restructure
+/// the element it was given as the editing root, and that root is the list
+/// itself. Moving the `li` by hand carries the caret with it, because the text
+/// node the selection points at moves along with the item.
+fn reindent(document: &Document, outdent: bool) {
+    let Some(item) = caret_item(document) else {
+        return;
+    };
+
+    // Where the caret sits, so it can be put back afterwards. Moving an item
+    // re-parents its text nodes without replacing them, so the same node and
+    // offset still describe the same spot once the move is done.
+    let caret = document
+        .get_selection()
+        .ok()
+        .flatten()
+        .and_then(|selection| Some((selection.focus_node()?, selection.focus_offset())));
+
+    if outdent {
+        outdent_item(&item);
+    } else {
+        indent_item(document, &item);
+    }
+
+    if let Some((node, offset)) = caret {
+        restore_caret(document, &node, offset);
+    }
+}
+
+fn restore_caret(document: &Document, node: &Node, offset: u32) -> Option<()> {
+    let selection = document.get_selection().ok()??;
+    let range = document.create_range().ok()?;
+
+    range.set_start(node, offset).ok()?;
+    range.collapse_with_to_start(true);
+    selection.remove_all_ranges().ok()?;
+    selection.add_range(&range).ok()?;
+    Some(())
+}
+
+/// Nests the item under the one before it.
+fn indent_item(document: &Document, item: &Element) -> Option<()> {
+    // An item can only nest under one that precedes it, in AsciiDoc as in
+    // HTML, so the first item of a list has nothing to nest under.
+    let previous = previous_item(item)?;
+    let list = item.parent_element()?;
+
+    let nested = match child_list(&previous) {
+        Some(existing) => existing,
+        None => {
+            let created = document.create_element(&list.tag_name()).ok()?;
+            previous.append_child(&created).ok()?;
+            created
+        }
+    };
+
+    nested.append_child(item).ok()?;
+    Some(())
+}
+
+/// Lifts the item out to its parent's level.
+fn outdent_item(item: &Element) -> Option<()> {
+    let list = item.parent_element()?;
+    let parent_item = list.parent_element()?.closest("li").ok()??;
+    let outer = parent_item.parent_element()?;
+
+    // Items below this one were deeper than it and must stay that way, so they
+    // follow it down a level.
+    let following: Vec<Element> = siblings_after(item);
+    if !following.is_empty() {
+        let sub = match child_list(item) {
+            Some(existing) => existing,
+            None => {
+                let created = item
+                    .owner_document()?
+                    .create_element(&list.tag_name())
+                    .ok()?;
+                item.append_child(&created).ok()?;
+                created
+            }
+        };
+
+        for sibling in following {
+            sub.append_child(&sibling).ok()?;
+        }
+    }
+
+    outer
+        .insert_before(item, parent_item.next_sibling().as_ref())
+        .ok()?;
+
+    // The list it came from may now be empty.
+    if list.query_selector("li").ok().flatten().is_none() {
+        match list.parent_element() {
+            // The renderer wraps a nested list in a div; drop that too.
+            Some(wrapper) if wrapper.tag_name().eq_ignore_ascii_case("div") => wrapper.remove(),
+            _ => list.remove(),
+        }
+    }
+
+    Some(())
+}
+
+/// The list nested inside an item, seeing through the renderer's wrapper.
+fn child_list(item: &Element) -> Option<Element> {
+    item.query_selector("ul, ol").ok()?
+}
+
+/// The item's following siblings, in order.
+fn siblings_after(item: &Element) -> Vec<Element> {
+    let mut out = Vec::new();
+    let mut sibling = item.next_element_sibling();
+
+    while let Some(candidate) = sibling {
+        sibling = candidate.next_element_sibling();
+        if candidate.tag_name().eq_ignore_ascii_case("li") {
+            out.push(candidate);
+        }
+    }
+
+    out
+}
+
+/// The list item the caret sits in.
+fn caret_item(document: &Document) -> Option<Element> {
+    let selection = document.get_selection().ok()??;
+    let node = selection.focus_node()?;
+
+    let element = match node.node_type() {
+        Node::ELEMENT_NODE => node.unchecked_into::<Element>(),
+        _ => node.parent_element()?,
+    };
+
+    element.closest("li").ok()?
+}
+
+fn previous_item(item: &Element) -> Option<Element> {
+    let mut sibling = item.previous_element_sibling();
+
+    while let Some(candidate) = sibling {
+        if candidate.tag_name().eq_ignore_ascii_case("li") {
+            return Some(candidate);
+        }
+        sibling = candidate.previous_element_sibling();
+    }
+
+    None
 }
 
 /// Re-casts the focused block as a heading of `level`, or as body text.

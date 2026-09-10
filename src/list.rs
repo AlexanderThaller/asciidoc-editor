@@ -68,10 +68,24 @@ pub fn from_element(element: &Element) -> Option<List> {
         _ => return None,
     };
 
-    let items = children(element)
-        .filter(|node| is_element(node, "LI"))
-        .map(|node| item_from_li(&node))
-        .collect();
+    let mut items: Vec<Item> = Vec::new();
+
+    for child in children(element) {
+        if is_element(&child, "LI") {
+            items.push(item_from_li(&child));
+            continue;
+        }
+
+        // Browsers may nest a list as a sibling of the items rather than
+        // inside the item it belongs to. Dropping it here would silently lose
+        // every item it holds, so it is folded into the item it follows.
+        if let (Some(nested), Some(previous)) = (as_list(&child), items.last_mut()) {
+            match &mut previous.nested {
+                Some(existing) => existing.items.extend(nested.items),
+                slot => *slot = Some(nested),
+            }
+        }
+    }
 
     Some(List { ordered, items })
 }
