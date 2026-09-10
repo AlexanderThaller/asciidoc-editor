@@ -87,7 +87,13 @@ body {
 
 /* Context bar: what is focused, and what can be done to it. */
 .toolbar.context {
-  min-height: 2.1rem;
+  /*
+   * Tall enough for a row of buttons whether or not any are showing, so that
+   * focusing a block cannot push the document down. Border-box, so this counts
+   * a button (1.5em of text, 0.6rem of padding, 2px of border), the bar's own
+   * 0.6rem of padding, and its 1px bottom border.
+   */
+  min-height: calc(1.5em + 1.2rem + 2px + 1px);
   padding-top: 0.3rem;
   padding-bottom: 0.3rem;
   background: #1e242c;
