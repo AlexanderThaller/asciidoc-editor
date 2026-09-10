@@ -149,7 +149,10 @@ mod tests {
 
     #[test]
     fn reads_the_text_of_a_range() {
-        assert_eq!(text_of(DOC, LineRange { start: 3, end: 4 }), "First para\nsecond line");
+        assert_eq!(
+            text_of(DOC, LineRange { start: 3, end: 4 }),
+            "First para\nsecond line"
+        );
         assert_eq!(text_of(DOC, LineRange::single(6)), "== Section");
     }
 
@@ -164,7 +167,10 @@ mod tests {
     fn replaces_one_line_with_several() {
         let edited = replace(DOC, LineRange::single(8), "a\n\nb");
 
-        assert_eq!(edited, "= Title\n\nFirst para\nsecond line\n\n== Section\n\na\n\nb\n");
+        assert_eq!(
+            edited,
+            "= Title\n\nFirst para\nsecond line\n\n== Section\n\na\n\nb\n"
+        );
     }
 
     #[test]
@@ -177,7 +183,10 @@ mod tests {
     fn inserts_a_block_before_a_line() {
         let edited = insert_block(DOC, 6, "New para");
 
-        assert_eq!(edited, "= Title\n\nFirst para\nsecond line\n\nNew para\n\n== Section\n\nTail\n");
+        assert_eq!(
+            edited,
+            "= Title\n\nFirst para\nsecond line\n\nNew para\n\n== Section\n\nTail\n"
+        );
     }
 
     #[test]

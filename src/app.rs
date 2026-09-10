@@ -76,8 +76,9 @@ pub fn App() -> impl IntoView {
         if let Some(handle) = save_timer.get_value() {
             handle.clear();
         }
-        save_timer
-            .set_value(set_timeout_with_handle(move || storage::save(&current), AUTOSAVE_DEBOUNCE).ok());
+        save_timer.set_value(
+            set_timeout_with_handle(move || storage::save(&current), AUTOSAVE_DEBOUNCE).ok(),
+        );
     });
 
     // A toolbar click must not take focus away from the block being edited,
@@ -354,8 +355,12 @@ fn sync_cursor(
     last_line: StoredValue<usize>,
     force: Force,
 ) {
-    let Some(ta) = textarea.get_untracked() else { return };
-    let Some(offset) = ta.selection_start().ok().flatten() else { return };
+    let Some(ta) = textarea.get_untracked() else {
+        return;
+    };
+    let Some(offset) = ta.selection_start().ok().flatten() else {
+        return;
+    };
 
     let line = source.with_untracked(|src| sync::line_of_offset(src, offset as usize));
     if line == last_line.get_value() && force == Force::No {
@@ -369,7 +374,9 @@ fn sync_cursor(
 }
 
 fn editor_has_focus(textarea: NodeRef<html::Textarea>) -> bool {
-    let Some(ta) = textarea.get_untracked() else { return false };
+    let Some(ta) = textarea.get_untracked() else {
+        return false;
+    };
 
     document()
         .active_element()
@@ -404,8 +411,12 @@ fn attach_click_to_locate(
             return;
         }
         let target: Element = target.unchecked_into();
-        let Some(line) = sync::source_line_of_click(&target) else { return };
-        let Some(ta) = textarea.get_untracked() else { return };
+        let Some(line) = sync::source_line_of_click(&target) else {
+            return;
+        };
+        let Some(ta) = textarea.get_untracked() else {
+            return;
+        };
 
         let offset = source.with_untracked(|src| sync::offset_of_line(src, line)) as u32;
         let _ = ta.focus();

@@ -71,7 +71,12 @@ pub fn highlight(src: &str) -> String {
 /// AsciiDoc fences may be longer than their canonical four characters (`-----`
 /// closes `-----`, not `----`), so the whole run is returned as the delimiter.
 fn opening_fence(line: &str) -> Option<&str> {
-    if line.len() >= 2 && PLAIN_FENCES.iter().chain(&VERBATIM_FENCES).any(|f| line == *f) {
+    if line.len() >= 2
+        && PLAIN_FENCES
+            .iter()
+            .chain(&VERBATIM_FENCES)
+            .any(|f| line == *f)
+    {
         return Some(line);
     }
 
@@ -183,7 +188,9 @@ mod tests {
                 _ => {}
             }
         }
-        out.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        out.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
     }
 
     /// The overlay must line up with the textarea character for character.
@@ -219,7 +226,10 @@ mod tests {
     fn verbatim_block_ends_at_its_own_fence() {
         let html = highlight("----\ncode\n----\n\n*bold*\n");
 
-        assert!(html.contains(r#"class="ad-bold""#), "markup resumes after the fence");
+        assert!(
+            html.contains(r#"class="ad-bold""#),
+            "markup resumes after the fence"
+        );
     }
 
     #[test]

@@ -86,7 +86,12 @@ pub fn mark_editable(content: &Element, src: &str) {
         title_line(src),
     ) {
         let range = LineRange::single(line);
-        offer(&title, range, 1, source::heading_text(&source::text_of(src, range)));
+        offer(
+            &title,
+            range,
+            1,
+            source::heading_text(&source::text_of(src, range)),
+        );
     }
 }
 
@@ -121,7 +126,9 @@ fn make_editable(element: &Element, range: LineRange, level: usize) {
 
 /// The block's content as AsciiDoc.
 fn serialize(element: &Element) -> String {
-    inline::to_asciidoc(&inline::from_node(element)).trim().to_string()
+    inline::to_asciidoc(&inline::from_node(element))
+        .trim()
+        .to_string()
 }
 
 /// Writes an edited block back into the source.
@@ -130,7 +137,9 @@ fn serialize(element: &Element) -> String {
 /// occupies, so their recorded numbers are shifted to keep them addressable
 /// without a re-render.
 pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) {
-    let Some(start) = attr(block, LINE) else { return };
+    let Some(start) = attr(block, LINE) else {
+        return;
+    };
     let level = attr(block, LEVEL).unwrap_or(0);
     let text = source::as_block(&serialize(block), (level > 0).then_some(level));
 
@@ -145,7 +154,10 @@ pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) 
         }
         // A block created by pressing Enter has no source of its own until
         // now; it takes one, plus the blank line that separates it.
-        None => (source::insert_block(&source.get_untracked(), start, &text), 0),
+        None => (
+            source::insert_block(&source.get_untracked(), start, &text),
+            0,
+        ),
     };
 
     let separator = usize::from(attr(block, END).is_none());
@@ -162,7 +174,9 @@ fn shift_lines_below(content: &Element, start: usize, added: usize, removed: usi
     }
 
     for block in select(content, &format!("[{LINE}]")) {
-        let Some(line) = attr(&block, LINE) else { continue };
+        let Some(line) = attr(&block, LINE) else {
+            continue;
+        };
         if line <= start {
             continue;
         }
@@ -284,7 +298,10 @@ pub fn format(document: &Document, command: &str) {
             return;
         }
 
-        let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        let escaped = text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
         let _ = commands.exec_command_with_show_ui_and_value(
             "insertHTML",
             false,
@@ -301,14 +318,23 @@ pub fn format(document: &Document, command: &str) {
 /// A paragraph folded into a heading loses its line breaks — a heading is a
 /// single line — so this always re-renders rather than trying to patch the
 /// existing DOM.
-pub fn set_level<R>(document: &Document, source: RwSignal<String>, level: Option<usize>, rerender: &R)
-where
+pub fn set_level<R>(
+    document: &Document,
+    source: RwSignal<String>,
+    level: Option<usize>,
+    rerender: &R,
+) where
     R: Fn(Option<usize>),
 {
-    let Some(block) = document.active_element().filter(|block| block.has_attribute(LINE)) else {
+    let Some(block) = document
+        .active_element()
+        .filter(|block| block.has_attribute(LINE))
+    else {
         return;
     };
-    let Some(start) = attr(&block, LINE) else { return };
+    let Some(start) = attr(&block, LINE) else {
+        return;
+    };
     let end = attr(&block, END).unwrap_or(start);
 
     let text = source::as_block(&serialize(&block), level);
@@ -331,7 +357,9 @@ fn split_block<R>(
 ) where
     R: Fn(Option<usize>),
 {
-    let Some(start) = attr(block, LINE) else { return };
+    let Some(start) = attr(block, LINE) else {
+        return;
+    };
     let end = attr(block, END).unwrap_or(start);
     let text = serialize(block);
 
@@ -340,7 +368,9 @@ fn split_block<R>(
     let offset = if attr(block, LEVEL).unwrap_or(0) > 0 {
         text.len()
     } else {
-        caret_offset(document, block).unwrap_or(text.len()).min(text.len())
+        caret_offset(document, block)
+            .unwrap_or(text.len())
+            .min(text.len())
     };
 
     if !text.is_char_boundary(offset) {
@@ -398,7 +428,11 @@ fn caret_offset(document: &Document, block: &Element) -> Option<usize> {
     range.set_end(&focus_node, selection.focus_offset()).ok()?;
 
     let fragment = range.clone_contents().ok()?;
-    Some(inline::to_asciidoc(&inline::from_node(&fragment)).trim_start().len())
+    Some(
+        inline::to_asciidoc(&inline::from_node(&fragment))
+            .trim_start()
+            .len(),
+    )
 }
 
 /// Puts the caret at the start of `element`.
@@ -423,10 +457,16 @@ pub fn focus(document: &Document, element: &Element) {
 fn editable_target(ev: &Event) -> Option<Element> {
     let target = ev.target()?.unchecked_into::<Node>();
     if target.node_type() != Node::ELEMENT_NODE {
-        return target.parent_element()?.closest(&format!("[{LINE}]")).ok()?;
+        return target
+            .parent_element()?
+            .closest(&format!("[{LINE}]"))
+            .ok()?;
     }
 
-    target.unchecked_into::<Element>().closest(&format!("[{LINE}]")).ok()?
+    target
+        .unchecked_into::<Element>()
+        .closest(&format!("[{LINE}]"))
+        .ok()?
 }
 
 fn listen<E, F>(document: &Document, event: &str, handler: F)

@@ -140,8 +140,14 @@ mod tests {
     fn resolves_date_attributes() {
         let (html, _) = render("= Title\n\nBuilt {docdate} at {doctime}.");
 
-        assert!(!html.contains("{docdate}"), "docdate should resolve: {html}");
-        assert!(!html.contains("{doctime}"), "doctime should resolve: {html}");
+        assert!(
+            !html.contains("{docdate}"),
+            "docdate should resolve: {html}"
+        );
+        assert!(
+            !html.contains("{doctime}"),
+            "doctime should resolve: {html}"
+        );
     }
 
     #[test]
@@ -149,7 +155,10 @@ mod tests {
         let html = render_standalone("= Title\n\nBody.");
 
         assert!(html.contains("<html"));
-        assert!(html.contains("<style>"), "export must not link the stylesheet");
+        assert!(
+            html.contains("<style>"),
+            "export must not link the stylesheet"
+        );
     }
 
     #[test]
@@ -158,8 +167,14 @@ mod tests {
             humanize("WarningType::UnterminatedDelimitedBlock"),
             "unterminated delimited block"
         );
-        assert_eq!(humanize("UnterminatedDelimitedBlock"), "unterminated delimited block");
-        assert_eq!(humanize("MissingAttribute(\"x\")"), "missing attribute(\"x\")");
+        assert_eq!(
+            humanize("UnterminatedDelimitedBlock"),
+            "unterminated delimited block"
+        );
+        assert_eq!(
+            humanize("MissingAttribute(\"x\")"),
+            "missing attribute(\"x\")"
+        );
         assert_eq!(humanize("Empty"), "empty");
     }
 

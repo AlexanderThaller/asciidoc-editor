@@ -10,7 +10,11 @@ const KEY: &str = "asciidoc-editor.source";
 /// Storage is unavailable in some privacy modes; a failure there just means
 /// starting from the sample document.
 pub fn load() -> Option<String> {
-    let stored = web_sys::window()?.local_storage().ok()??.get_item(KEY).ok()?;
+    let stored = web_sys::window()?
+        .local_storage()
+        .ok()??
+        .get_item(KEY)
+        .ok()?;
     stored.filter(|s| !s.is_empty())
 }
 
