@@ -21,8 +21,18 @@ const PREVIEW_SHELL: &str = r#"<!doctype html><html><head><meta charset="utf-8">
 <style>body{margin:0;padding:1.25rem 1.5rem}</style></head>
 <body class="article"><div id="content"></div></body></html>"#;
 
+/// Which surface the document is edited through.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mode {
+    /// Edit the rendered document directly.
+    Rich,
+    /// Edit the AsciiDoc source, with the rendering alongside it.
+    Source,
+}
+
 #[component]
 pub fn App() -> impl IntoView {
+    let mode = RwSignal::new(Mode::Rich);
     let source = RwSignal::new(storage::load().unwrap_or_else(|| SAMPLE.to_string()));
     // Trails `source` by the debounce interval; drives the expensive render.
     let settled = RwSignal::new(source.get_untracked());
@@ -81,6 +91,24 @@ pub fn App() -> impl IntoView {
     view! {
         <header class="toolbar">
             <span class="brand">"AsciiDoc"</span>
+
+            <div class="modes">
+                <button
+                    class="button"
+                    class:active=move || mode.get() == Mode::Rich
+                    on:click=move |_| mode.set(Mode::Rich)
+                >
+                    "Rich text"
+                </button>
+                <button
+                    class="button"
+                    class:active=move || mode.get() == Mode::Source
+                    on:click=move |_| mode.set(Mode::Source)
+                >
+                    "Source"
+                </button>
+            </div>
+
             <div class="spacer"></div>
             <label class="button">
                 "Open"
@@ -114,7 +142,7 @@ pub fn App() -> impl IntoView {
             </button>
         </header>
 
-        <main class="panes">
+        <main class="panes" class:rich=move || mode.get() == Mode::Rich>
             <section class="editor">
                 <pre class="overlay" node_ref=overlay inner_html=move || highlight::highlight(&source.get())></pre>
                 <textarea
