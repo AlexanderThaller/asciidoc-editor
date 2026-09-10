@@ -7,7 +7,14 @@ use asciidoc_html5::{Options, ReferenceTime, SafeMode};
 
 /// Body-only HTML for the preview pane, annotated with `data-source-line`.
 fn preview_options() -> Options {
-    pinned(Options::new().embedded(true).source_locations(true))
+    // The document title is part of what a rich-text editor should show and
+    // let you edit; embedded output leaves it out unless asked.
+    pinned(
+        Options::new()
+            .embedded(true)
+            .source_locations(true)
+            .set_default("showtitle"),
+    )
 }
 
 /// Pins the clock that drives `docdate`, `doctime` and their `local*` siblings.

@@ -46,6 +46,9 @@ const END: &str = "data-edit-end";
 /// Heading level, or `0` for body text.
 const LEVEL: &str = "data-edit-level";
 
+/// Explains why a block that looks editable is not.
+const REFUSED: &str = "This block can only be edited in source mode";
+
 /// Makes every safely editable block in the rendered document editable.
 pub fn mark_editable(content: &Element, src: &str) {
     for block in select(content, "div.paragraph[data-source-line]") {
@@ -54,9 +57,7 @@ pub fn mark_editable(content: &Element, src: &str) {
         };
 
         let range = source::paragraph_range(src, line);
-        if round_trips(&paragraph, &source::text_of(src, range)) {
-            make_editable(&paragraph, range, 0);
-        }
+        offer(&paragraph, range, 0, &source::text_of(src, range));
     }
 
     for level in 1..=6 {
@@ -66,13 +67,44 @@ pub fn mark_editable(content: &Element, src: &str) {
             };
 
             let title = source::text_of(src, LineRange::single(line));
-            if source::heading_level(&title) == Some(level)
-                && round_trips(&heading, source::heading_text(&title))
-            {
-                make_editable(&heading, LineRange::single(line), level);
+            if source::heading_level(&title) == Some(level) {
+                offer(
+                    &heading,
+                    LineRange::single(line),
+                    level,
+                    source::heading_text(&title),
+                );
             }
         }
     }
+
+    // The document title is rendered from the header rather than from a block,
+    // so it carries no source line of its own — but it is always the first
+    // level-1 heading in the source.
+    if let (Ok(Some(title)), Some(line)) = (
+        content.query_selector("h1:not([data-source-line])"),
+        title_line(src),
+    ) {
+        let range = LineRange::single(line);
+        offer(&title, range, 1, source::heading_text(&source::text_of(src, range)));
+    }
+}
+
+/// Makes `element` editable if it survives the round trip, and says why not
+/// when it does not.
+fn offer(element: &Element, range: LineRange, level: usize, expected: &str) {
+    if round_trips(element, expected) {
+        make_editable(element, range, level);
+    } else {
+        let _ = element.set_attribute("title", REFUSED);
+    }
+}
+
+/// The line holding the document title.
+fn title_line(src: &str) -> Option<usize> {
+    src.lines()
+        .position(|line| source::heading_level(line) == Some(1))
+        .map(|index| index + 1)
 }
 
 /// Whether writing this element back out reproduces its source exactly.
