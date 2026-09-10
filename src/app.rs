@@ -44,17 +44,18 @@ body{margin:0;padding:1.25rem 1.5rem}
 /*
  * Admonition icons. The renderer only emits Font Awesome glyphs when the
  * document may enable `icons`, which safe mode forbids, and a webfont would
- * not load offline anyway — so the label draws its own symbol.
+ * not load offline anyway — so the label draws its own symbol and then hides
+ * its own text: the symbol already says which kind it is. Zero font size
+ * rather than `display:none`, which would take the symbol with it.
  */
-.admonitionblock td.icon .title::before{display:block;font-size:1.5em;line-height:1;margin-bottom:.15rem;font-style:normal}
-.admonitionblock.note td.icon .title::before{content:"\2139\FE0F"}
-.admonitionblock.tip td.icon .title::before{content:"\1F4A1"}
-.admonitionblock.important td.icon .title::before{content:"\2757"}
-.admonitionblock.warning td.icon .title::before{content:"\26A0\FE0F"}
-.admonitionblock.caution td.icon .title::before{content:"\1F525"}
-[data-edit-line]{border-radius:3px}
-[data-edit-line]:hover{background:rgba(127,180,255,.08)}
-[data-edit-line]:focus{outline:2px solid rgba(127,180,255,.5);outline-offset:4px}
+.admonitionblock>table td.icon{width:3rem;text-align:center;vertical-align:top;padding-top:.1rem}
+.admonitionblock>table td.icon .title{font-size:0;line-height:0}
+.admonitionblock>table td.icon .title::before{display:block;font-size:1.6rem;line-height:1.2;font-style:normal}
+.admonitionblock.note>table td.icon .title::before{content:"\2139\FE0F"}
+.admonitionblock.tip>table td.icon .title::before{content:"\1F4A1"}
+.admonitionblock.important>table td.icon .title::before{content:"\2757"}
+.admonitionblock.warning>table td.icon .title::before{content:"\26A0\FE0F"}
+.admonitionblock.caution>table td.icon .title::before{content:"\1F525"}
 </style></head>
 <body class="article"><div id="content"></div></body></html>"#;
 
