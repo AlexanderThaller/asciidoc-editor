@@ -51,8 +51,9 @@ pub enum Kind {
     },
     /// The title attached to a block, such as `.Things that work`.
     Title,
-    /// An inline admonition, such as `NOTE: mind the gap`.
-    Admonition,
+    /// An inline admonition, such as `NOTE: mind the gap`, labelled with one
+    /// of [`source::ADMONITIONS`].
+    Admonition(&'static str),
 }
 
 /// Start line of the source the block was rendered from.
@@ -153,8 +154,12 @@ pub fn mark_editable(content: &Element, src: &str) {
             continue;
         };
 
+        let Some(label) = source::admonition_label(lead) else {
+            continue;
+        };
+
         let _ = body.set_attribute(LEAD, lead);
-        offer(&body, range, Kind::Admonition, &text[lead.len()..]);
+        offer(&body, range, Kind::Admonition(label), &text[lead.len()..]);
     }
 
     for block in select(content, "[data-source-line]") {
@@ -278,8 +283,11 @@ fn kind_of(block: &Element) -> Kind {
         return Kind::Title;
     }
 
-    if block.has_attribute(LEAD) {
-        return Kind::Admonition;
+    if let Some(label) = block
+        .get_attribute(LEAD)
+        .and_then(|lead| source::admonition_label(&lead))
+    {
+        return Kind::Admonition(label);
     }
 
     if is_list(block) {
@@ -321,7 +329,7 @@ pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) 
         }
         Kind::Heading(level) => source::as_block(&serialize(block), Some(level)),
         // The label is part of the source line but not of what is rendered.
-        Kind::Admonition => format!(
+        Kind::Admonition(_) => format!(
             "{}{}",
             block.get_attribute(LEAD).unwrap_or_default(),
             serialize(block)
@@ -743,6 +751,46 @@ pub fn set_list<R>(
 /// Placeholder for a title that has just been added, selected so that the
 /// first keystroke replaces it.
 const NEW_TITLE: &str = "Title";
+
+/// Labels the focused block as an admonition, or takes the label away.
+///
+/// What is rendered never contains the label, so the block's text can simply
+/// be written back out under a different one — or under none.
+pub fn set_admonition<R>(
+    document: &Document,
+    source: RwSignal<String>,
+    label: Option<&str>,
+    rerender: &R,
+) where
+    R: Fn(Option<usize>),
+{
+    let Some(block) = focused(document) else {
+        return;
+    };
+    // Only body text can take a label, and only an admonition can lose one.
+    if !matches!(kind_of(&block), Kind::Body | Kind::Admonition(_)) {
+        return;
+    }
+
+    let Some(start) = attr(&block, LINE) else {
+        return;
+    };
+    let end = attr(&block, END).unwrap_or(start);
+
+    let text = serialize(&block);
+    let replacement = match label {
+        Some(label) => format!("{label}: {text}"),
+        None => text,
+    };
+
+    source.set(source::replace(
+        &source.get_untracked(),
+        LineRange { start, end },
+        &replacement,
+    ));
+
+    rerender(Some(start));
+}
 
 /// Gives the focused block a title, and puts the caret in it.
 pub fn add_title<R>(document: &Document, source: RwSignal<String>, rerender: &R)

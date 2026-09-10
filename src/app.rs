@@ -14,6 +14,23 @@ const SAMPLE: &str = include_str!("../assets/sample.adoc");
 /// largest heading a body author writes is `==`.
 const HEADINGS: [(&str, usize); 3] = [("H1", 2), ("H2", 3), ("H3", 4)];
 
+/// The symbol each admonition draws in the preview, reused on the buttons that
+/// apply it.
+const ADMONITION_ICONS: [(&str, &str); 5] = [
+    ("NOTE", "\u{2139}\u{fe0f}"),
+    ("TIP", "\u{1f4a1}"),
+    ("IMPORTANT", "\u{2757}"),
+    ("WARNING", "\u{26a0}\u{fe0f}"),
+    ("CAUTION", "\u{1f525}"),
+];
+
+fn icon_for(label: &str) -> &'static str {
+    ADMONITION_ICONS
+        .iter()
+        .find(|(name, _)| *name == label)
+        .map_or("\u{2139}\u{fe0f}", |(_, icon)| icon)
+}
+
 /// Re-rendering on every keystroke is wasteful; this is short enough to feel live.
 const RENDER_DEBOUNCE: Duration = Duration::from_millis(150);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -128,6 +145,18 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    // Clicking the label a block already carries takes it off again.
+    let apply_admonition = move |label: Option<&'static str>| {
+        let label = match (label, editing.get_untracked().map(|block| block.kind)) {
+            (Some(label), Some(wysiwyg::Kind::Admonition(current))) if current == label => None,
+            (label, _) => label,
+        };
+
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::set_admonition(&document, source, label, &rerender);
+        }
+    };
+
     let apply_title = move |add: bool| {
         if let Some(document) = preview_document(frame) {
             if add {
@@ -238,7 +267,7 @@ pub fn App() -> impl IntoView {
                                 .is_some_and(|block| {
                                     matches!(
                                         block.kind,
-                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition
+                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition(_)
                                     )
                                 })
                         }
@@ -253,6 +282,26 @@ pub fn App() -> impl IntoView {
                     </button>
                     <button
                         class="button icon"
+                        title="Admonition"
+                        disabled=move || {
+                            !matches!(
+                                editing.get().map(|block| block.kind),
+                                Some(wysiwyg::Kind::Body) | Some(wysiwyg::Kind::Admonition(_))
+                            )
+                        }
+                        class:active=move || {
+                            matches!(
+                                editing.get().map(|block| block.kind),
+                                Some(wysiwyg::Kind::Admonition(_))
+                            )
+                        }
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_admonition(Some("NOTE"))
+                    >
+                        {icon_for("NOTE")}
+                    </button>
+                    <button
+                        class="button icon"
                         title="Numbered list"
                         disabled=move || {
                             editing
@@ -260,7 +309,7 @@ pub fn App() -> impl IntoView {
                                 .is_some_and(|block| {
                                     matches!(
                                         block.kind,
-                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition
+                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition(_)
                                     )
                                 })
                         }
@@ -286,7 +335,7 @@ pub fn App() -> impl IntoView {
                                     block.kind,
                                     wysiwyg::Kind::List { .. }
                                         | wysiwyg::Kind::Title
-                                        | wysiwyg::Kind::Admonition
+                                        | wysiwyg::Kind::Admonition(_)
                                 )
                             })
                         }
@@ -311,7 +360,7 @@ pub fn App() -> impl IntoView {
                                                 block.kind,
                                                 wysiwyg::Kind::List { .. }
                                                     | wysiwyg::Kind::Title
-                                                    | wysiwyg::Kind::Admonition
+                                                    | wysiwyg::Kind::Admonition(_)
                                             )
                                         })
                                     }
@@ -376,6 +425,7 @@ pub fn App() -> impl IntoView {
                         let titled = block.title_line.is_some();
                         let is_title = block.kind == wysiwyg::Kind::Title;
                         let is_list = matches!(block.kind, wysiwyg::Kind::List { .. });
+                        let is_admonition = matches!(block.kind, wysiwyg::Kind::Admonition(_));
                         // A heading is a title already; AsciiDoc gives it none.
                         let takes_title = !matches!(block.kind, wysiwyg::Kind::Heading(_));
                         view! {
@@ -389,6 +439,37 @@ pub fn App() -> impl IntoView {
                                     on:click=move |_| apply_title(!titled)
                                 >
                                     {if titled { "Remove title" } else { "Add title" }}
+                                </button>
+                            </Show>
+
+                            <Show when=move || is_admonition>
+                                <span class="separator"></span>
+                                {ADMONITION_ICONS
+                                    .iter()
+                                    .map(|(label, icon)| {
+                                        view! {
+                                            <button
+                                                class="button icon"
+                                                title=*label
+                                                class:active=move || {
+                                                    editing.get().map(|block| block.kind)
+                                                        == Some(wysiwyg::Kind::Admonition(label))
+                                                }
+                                                on:mousedown=|ev| ev.prevent_default()
+                                                on:click=move |_| apply_admonition(Some(label))
+                                            >
+                                                {*icon}
+                                            </button>
+                                        }
+                                    })
+                                    .collect_view()}
+                                <button
+                                    class="button"
+                                    title="Turn this back into an ordinary paragraph"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_admonition(None)
+                                >
+                                    "Remove"
                                 </button>
                             </Show>
 
@@ -493,7 +574,7 @@ fn describe(kind: wysiwyg::Kind) -> String {
         wysiwyg::Kind::List { ordered: false } => "Bulleted list".to_string(),
         wysiwyg::Kind::List { ordered: true } => "Numbered list".to_string(),
         wysiwyg::Kind::Title => "Block title".to_string(),
-        wysiwyg::Kind::Admonition => "Admonition".to_string(),
+        wysiwyg::Kind::Admonition(label) => label.to_string(),
     }
 }
 

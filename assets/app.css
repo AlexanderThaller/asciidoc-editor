@@ -72,6 +72,8 @@ body {
   min-width: 1.9rem;
   padding: 0.3rem 0.4rem;
   text-align: center;
+  /* The interface stack carries no emoji on every platform; these do. */
+  font-family: "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", inherit;
 }
 .button.icon code { font-size: 11px; }
 .button input[type="file"] { display: none; }

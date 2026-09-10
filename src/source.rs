@@ -110,7 +110,16 @@ pub fn list_marker(line: &str) -> Option<&str> {
 }
 
 /// Admonition labels, in the inline form `NOTE: text`.
-const ADMONITIONS: [&str; 5] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
+pub const ADMONITIONS: [&str; 5] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
+
+/// The canonical label `text` begins with, whether that is a bare label or a
+/// whole lead such as `NOTE: `.
+pub fn admonition_label(text: &str) -> Option<&'static str> {
+    ADMONITIONS
+        .iter()
+        .copied()
+        .find(|label| text.starts_with(label))
+}
 
 /// The label an inline admonition starts with, including its separator.
 ///
@@ -398,6 +407,14 @@ mod tests {
         assert_eq!(admonition_lead("Note: lowercase"), None);
         assert_eq!(admonition_lead("NOTE"), None);
         assert_eq!(admonition_lead("Body text"), None);
+    }
+
+    #[test]
+    fn matches_labels_to_their_canonical_form() {
+        assert_eq!(admonition_label("NOTE: text"), Some("NOTE"));
+        assert_eq!(admonition_label("WARNING: "), Some("WARNING"));
+        assert_eq!(admonition_label("TIP"), Some("TIP"));
+        assert_eq!(admonition_label("Nope"), None);
     }
 
     #[test]
