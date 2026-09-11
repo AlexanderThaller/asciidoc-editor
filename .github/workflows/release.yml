@@ -3,6 +3,10 @@
 # No token and no second factor: npm trusts this workflow by name, and the
 # proof is an OIDC token GitHub mints for the run. That trust has to be set up
 # once, on the package's settings page at npmjs.com, naming this file.
+#
+# Every tool the build shells out to comes from the flake, pinned by
+# flake.lock, so this runs the same compiler and the same wasm-opt as a
+# developer does. Two releases failed before that was true.
 name: Release
 
 on:
@@ -22,26 +26,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: cachix/install-nix-action@v31
         with:
-          targets: wasm32-unknown-unknown
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
-      - uses: Swatinem/rust-cache@v2
+      - run: nix develop --command cargo test
 
-      # The generator has to match the wasm-bindgen the crate is built
-      # against, so it comes from the lockfile rather than from `latest`.
-      - name: Install wasm-bindgen
-        run: |
-          version=$(awk '/^name = "wasm-bindgen"$/ { found = 1; next }
-                         found && /^version/ { gsub(/[",]/, "", $3); print $3; exit }' Cargo.lock)
-          cargo install wasm-bindgen-cli --version "$version" --locked
+      - run: nix develop --command cargo clippy --all-targets --target wasm32-unknown-unknown
 
-      - name: Install wasm-opt
-        run: sudo apt-get update && sudo apt-get install --yes binaryen
-
-      - run: cargo test
-
-      - run: ./build-package.sh
+      - run: nix develop --command ./build-package.sh
 
       - uses: actions/setup-node@v4
         with:

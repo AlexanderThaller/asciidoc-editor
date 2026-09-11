@@ -115,10 +115,23 @@ MIT. See `LICENSE`.
 
 ## Developing
 
+Every tool this needs is in the flake, pinned by `flake.lock` — the same
+compiler, generator and optimiser here as in CI:
+
 ```sh
+nix develop
 trunk serve      # the editor on its own at http://localhost:8080
 cargo test       # the source-editing and parsing logic
 ```
+
+With direnv, `direnv allow` enters it for you. Without Nix it still builds from
+whatever is on PATH, so long as `wasm-bindgen` matches the version in
+`Cargo.lock` — `build-package.sh` refuses to run when it does not, because a
+mismatch yields a module the browser rejects at load.
+
+That pin runs the other way too: `wasm-bindgen` is held at an exact version in
+`Cargo.toml` because it has to match the CLI nixpkgs provides. Moving one means
+moving both.
 
 `trunk serve` runs `src/main.rs`, which is the same library mounted onto a bare
 page.

@@ -3,3 +3,4 @@
 /pkg
 
 rustc-ice-*.txt
+.direnv/
