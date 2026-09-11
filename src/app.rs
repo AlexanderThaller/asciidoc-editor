@@ -10,6 +10,16 @@ use crate::{highlight, render, source, storage, sync, wysiwyg};
 
 const SAMPLE: &str = include_str!("../assets/sample.adoc");
 
+/// A document as it stood, and where the caret was at the time.
+#[derive(Clone, Debug)]
+struct Step {
+    source: String,
+    line: Option<usize>,
+}
+
+/// How many steps back the editor remembers.
+const HISTORY_DEPTH: usize = 200;
+
 /// How large a file may be before embedding it stops being sensible. Base64
 /// adds about a third, and every keystroke copies the whole source.
 const MAX_EMBEDDED_BYTES: f64 = 2.0 * 1_048_576.0;
@@ -95,6 +105,12 @@ pub fn App() -> impl IntoView {
     // left alone: re-rendering under a live caret would destroy it.
     let editing = RwSignal::new(None::<wysiwyg::Block>);
 
+    // What the document looked like before each settled change, so that a
+    // structural edit — or a burst of typing — can be taken back.
+    let past = StoredValue::new(Vec::<Step>::new());
+    let future = StoredValue::new(Vec::<Step>::new());
+    let depth = RwSignal::new((0usize, 0usize));
+
     let render_timer = StoredValue::new(None::<TimeoutHandle>);
     let save_timer = StoredValue::new(None::<TimeoutHandle>);
     let last_line = StoredValue::new(0usize);
@@ -109,7 +125,31 @@ pub fn App() -> impl IntoView {
         }
         let for_render = current.clone();
         render_timer.set_value(
-            set_timeout_with_handle(move || settled.set(for_render), RENDER_DEBOUNCE).ok(),
+            set_timeout_with_handle(
+                move || {
+                    // One step per pause in the typing, rather than per
+                    // keystroke: the debounce already marks where a change
+                    // settled, which is the same place undo should stop.
+                    let previous = settled.get_untracked();
+                    if previous != for_render {
+                        past.update_value(|steps| {
+                            steps.push(Step {
+                                source: previous,
+                                line: editing.get_untracked().map(|block| block.line),
+                            });
+                            if steps.len() > HISTORY_DEPTH {
+                                steps.remove(0);
+                            }
+                        });
+                        future.update_value(Vec::clear);
+                        depth.set((past.with_value(Vec::len), 0));
+                    }
+
+                    settled.set(for_render);
+                },
+                RENDER_DEBOUNCE,
+            )
+            .ok(),
         );
 
         if let Some(handle) = save_timer.get_value() {
@@ -159,6 +199,29 @@ pub fn App() -> impl IntoView {
         }
 
         warnings.set(warns);
+    };
+
+    // Undo and redo move a step between the two stacks, leaving `settled` in
+    // step with the source so the move is not recorded as a change of its own.
+    let travel = move |back: bool| {
+        let (from, to) = if back { (past, future) } else { (future, past) };
+        let Some(step) = from.try_update_value(Vec::pop).flatten() else {
+            return;
+        };
+
+        to.update_value(|steps| {
+            steps.push(Step {
+                source: source.get_untracked(),
+                line: editing.get_untracked().map(|block| block.line),
+            });
+        });
+
+        source.set(step.source.clone());
+        settled.set(step.source);
+        editing.set(None);
+        depth.set((past.with_value(Vec::len), future.with_value(Vec::len)));
+
+        rerender(step.line);
     };
 
     let apply_level = move |level: Option<usize>| {
@@ -464,7 +527,28 @@ pub fn App() -> impl IntoView {
             <span class="separator"></span>
             <button
                 class="button icon"
+                title="Undo (ctrl+Z)"
+                disabled=move || depth.get().0 == 0
+                on:mousedown=|ev| ev.prevent_default()
+                on:click=move |_| travel(true)
+            >
+                "↶"
+            </button>
+            <button
+                class="button icon"
+                title="Redo (ctrl+shift+Z)"
+                disabled=move || depth.get().1 == 0
+                on:mousedown=|ev| ev.prevent_default()
+                on:click=move |_| travel(false)
+            >
+                "↷"
+            </button>
+
+            <span class="separator"></span>
+            <button
+                class="button icon"
                 title="Insert an image"
+                on:mousedown=|ev| ev.prevent_default()
                 class:active=move || image_panel.get()
                 on:click=move |_| {
                     notice.set(None);
@@ -750,7 +834,14 @@ pub fn App() -> impl IntoView {
                         if let (Some(document), Some(content)) =
                             (preview_document(frame), preview_content(frame))
                         {
-                            wysiwyg::attach(&document, content, source, editing, rerender);
+                            wysiwyg::attach(
+                                &document,
+                                content,
+                                source,
+                                editing,
+                                rerender,
+                                travel,
+                            );
                         }
 
                         preview_ready.set(true);

@@ -716,14 +716,16 @@ fn shift_lines_below(content: &Element, start: usize, added: usize, removed: usi
 ///
 /// `rerender` re-renders the document and, given a line, puts the caret at the
 /// start of the block that came from it.
-pub fn attach<R>(
+pub fn attach<R, T>(
     document: &Document,
     content: Element,
     source: RwSignal<String>,
     editing: RwSignal<Option<Block>>,
     rerender: R,
+    travel: T,
 ) where
     R: Fn(Option<usize>) + Clone + 'static,
+    T: Fn(bool) + 'static,
 {
     let on_input = {
         let content = content.clone();
@@ -802,6 +804,14 @@ pub fn attach<R>(
             }
 
             if ev.ctrl_key() || ev.meta_key() {
+                // The document's own history, not the browser's: an edit here
+                // may have rewritten lines the browser never saw.
+                if ev.key().eq_ignore_ascii_case("z") {
+                    ev.prevent_default();
+                    travel(!ev.shift_key());
+                    return;
+                }
+
                 let command = match ev.key().to_ascii_lowercase().as_str() {
                     "b" => "bold",
                     "i" => "italic",
