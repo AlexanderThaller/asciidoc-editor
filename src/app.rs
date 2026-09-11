@@ -135,6 +135,17 @@ pub fn App() -> impl IntoView {
             if let Some(line) = focus_line {
                 focus_block(frame, &content, line);
             }
+
+            // An operation may have removed the block the caret was in. With
+            // nothing focused, the context bar has no business still
+            // describing it.
+            let focused = preview_document(frame)
+                .and_then(|document| document.active_element())
+                .is_some_and(|element| element.has_attribute("data-edit-line"));
+
+            if !focused {
+                editing.set(None);
+            }
         }
 
         warnings.set(warns);
@@ -171,6 +182,18 @@ pub fn App() -> impl IntoView {
     let apply_row = move |add: bool| {
         if let Some(document) = preview_document(frame) {
             wysiwyg::table_row(&document, source, add, &rerender);
+        }
+    };
+
+    let apply_column = move |add: bool| {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::table_column(&document, source, add, &rerender);
+        }
+    };
+
+    let drop_table = move || {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::remove_table(&document, source, &rerender);
         }
     };
 
@@ -276,7 +299,7 @@ pub fn App() -> impl IntoView {
                                         block.kind,
                                         wysiwyg::Kind::Title
                                             | wysiwyg::Kind::Admonition(_)
-                                            | wysiwyg::Kind::Table
+                                            | wysiwyg::Kind::Table { .. }
                                     )
                                 })
                         }
@@ -320,7 +343,7 @@ pub fn App() -> impl IntoView {
                                         block.kind,
                                         wysiwyg::Kind::Title
                                             | wysiwyg::Kind::Admonition(_)
-                                            | wysiwyg::Kind::Table
+                                            | wysiwyg::Kind::Table { .. }
                                     )
                                 })
                         }
@@ -347,7 +370,7 @@ pub fn App() -> impl IntoView {
                                     wysiwyg::Kind::List { .. }
                                         | wysiwyg::Kind::Title
                                         | wysiwyg::Kind::Admonition(_)
-                                        | wysiwyg::Kind::Table
+                                        | wysiwyg::Kind::Table { .. }
                                 )
                             })
                         }
@@ -373,7 +396,7 @@ pub fn App() -> impl IntoView {
                                                 wysiwyg::Kind::List { .. }
                                                     | wysiwyg::Kind::Title
                                                     | wysiwyg::Kind::Admonition(_)
-                                                    | wysiwyg::Kind::Table
+                                                    | wysiwyg::Kind::Table { .. }
                                             )
                                         })
                                     }
@@ -439,7 +462,11 @@ pub fn App() -> impl IntoView {
                         let is_title = block.kind == wysiwyg::Kind::Title;
                         let is_list = matches!(block.kind, wysiwyg::Kind::List { .. });
                         let is_admonition = matches!(block.kind, wysiwyg::Kind::Admonition(_));
-                        let is_table = block.kind == wysiwyg::Kind::Table;
+                        let is_table = matches!(block.kind, wysiwyg::Kind::Table { .. });
+                        let fixed_columns = block.kind
+                            == wysiwyg::Kind::Table {
+                                fixed_columns: true,
+                            };
                         // A heading is a title already; AsciiDoc gives it none.
                         let takes_title = !matches!(block.kind, wysiwyg::Kind::Heading(_));
                         view! {
@@ -504,6 +531,42 @@ pub fn App() -> impl IntoView {
                                     on:click=move |_| apply_row(false)
                                 >
                                     "− Row"
+                                </button>
+                                <button
+                                    class="button"
+                                    title=if fixed_columns {
+                                        "This table's cols attribute pins its columns"
+                                    } else {
+                                        "Add a column beside this one"
+                                    }
+                                    disabled=move || fixed_columns
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_column(true)
+                                >
+                                    "+ Col"
+                                </button>
+                                <button
+                                    class="button"
+                                    title=if fixed_columns {
+                                        "This table's cols attribute pins its columns"
+                                    } else {
+                                        "Delete this column"
+                                    }
+                                    disabled=move || fixed_columns
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_column(false)
+                                >
+                                    "− Col"
+                                </button>
+
+                                <span class="separator"></span>
+                                <button
+                                    class="button danger"
+                                    title="Delete the whole table"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| drop_table()
+                                >
+                                    "Delete table"
                                 </button>
                             </Show>
 
@@ -609,7 +672,7 @@ fn describe(kind: wysiwyg::Kind) -> String {
         wysiwyg::Kind::List { ordered: true } => "Numbered list".to_string(),
         wysiwyg::Kind::Title => "Block title".to_string(),
         wysiwyg::Kind::Admonition(label) => label.to_string(),
-        wysiwyg::Kind::Table => "Table cell".to_string(),
+        wysiwyg::Kind::Table { .. } => "Table cell".to_string(),
     }
 }
 

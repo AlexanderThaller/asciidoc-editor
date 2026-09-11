@@ -190,11 +190,103 @@ pub fn list_range(src: &str, start: usize) -> Option<LineRange> {
     })
 }
 
+/// What a table's `cols` attribute says about its columns.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Columns {
+    /// No `cols` attribute: the columns follow the rows and need no upkeep.
+    Implicit,
+    /// A plain list of widths, which can be kept in step with the rows.
+    Widths { line: usize, values: Vec<String> },
+    /// A `cols` this module will not rewrite — a repeat (`3*`), an alignment
+    /// or a per-column style. Changing the columns under it would describe a
+    /// table that no longer exists.
+    Opaque,
+}
+
+/// Reads the `cols` attribute attached to the table starting at `start`.
+pub fn columns_attribute(src: &str, start: usize) -> Columns {
+    let mut line = start;
+
+    loop {
+        let text = text_of(src, LineRange::single(line));
+        if !is_attached(&text) {
+            return Columns::Implicit;
+        }
+
+        if let Some(values) = column_widths(&text) {
+            return Columns::Widths { line, values };
+        }
+
+        if text.contains("cols=") {
+            return Columns::Opaque;
+        }
+
+        line += 1;
+    }
+}
+
+/// The plain numeric widths of a `cols="1,2"` attribute.
+fn column_widths(line: &str) -> Option<Vec<String>> {
+    let (_, rest) = line.split_once("cols=\"")?;
+    let (values, _) = rest.split_once('"')?;
+
+    let values: Vec<String> = values.split(',').map(str::trim).map(String::from).collect();
+    values
+        .iter()
+        .all(|value| !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()))
+        .then_some(values)
+}
+
+/// Rewrites an attribute line's `cols` to the given widths.
+pub fn with_columns(line: &str, values: &[String]) -> String {
+    let Some((before, rest)) = line.split_once("cols=\"") else {
+        return line.to_string();
+    };
+    let Some((_, after)) = rest.split_once('"') else {
+        return line.to_string();
+    };
+
+    format!("{before}cols=\"{}\"{after}", values.join(","))
+}
+
+/// Every line of the table starting at `start`, delimiters and attachments
+/// included.
+pub fn table_block_range(src: &str, start: usize) -> Option<LineRange> {
+    let (_, closing) = table_delimiters(src, start)?;
+
+    Some(LineRange {
+        start,
+        end: closing,
+    })
+}
+
+/// Removes `range` outright, rather than leaving a blank line behind.
+pub fn remove_lines(src: &str, range: LineRange) -> String {
+    let kept: Vec<&str> = src
+        .lines()
+        .enumerate()
+        .filter(|(index, _)| !(range.start..=range.end).contains(&(index + 1)))
+        .map(|(_, line)| line)
+        .collect();
+
+    restore_trailing_newline(kept.join("\n"), src)
+}
+
 /// The rows between the delimiters of the table starting at `start`.
 ///
 /// The delimiters and anything attached above them stay where they are; only
 /// the rows between are ever rewritten.
 pub fn table_range(src: &str, start: usize) -> Option<LineRange> {
+    let (opening, closing) = table_delimiters(src, start)?;
+
+    // A table with no rows has nothing to address.
+    (closing > opening + 1).then_some(LineRange {
+        start: opening + 1,
+        end: closing - 1,
+    })
+}
+
+fn table_delimiters(src: &str, start: usize) -> Option<(usize, usize)> {
     let mut opening = start;
     while is_attached(&text_of(src, LineRange::single(opening))) {
         opening += 1;
@@ -208,11 +300,7 @@ pub fn table_range(src: &str, start: usize) -> Option<LineRange> {
     let closing = (opening + 1..=total)
         .find(|line| text_of(src, LineRange::single(*line)).trim() == "|===")?;
 
-    // A table with no rows has nothing to address.
-    (closing > opening + 1).then_some(LineRange {
-        start: opening + 1,
-        end: closing - 1,
-    })
+    Some((opening, closing))
 }
 
 /// The source text of `range`.
@@ -429,6 +517,46 @@ mod tests {
         let doc = "= T\n\n.A table\n[cols=\"1,2\"]\n|===\n| a | b\n| c | d\n|===\n\nAfter\n";
 
         assert_eq!(table_range(doc, 3), Some(LineRange { start: 6, end: 7 }));
+    }
+
+    #[test]
+    fn reads_and_rewrites_plain_column_widths() {
+        let doc = "= T\n\n.A table\n[cols=\"1,2\"]\n|===\n| a | b\n|===\n";
+
+        assert_eq!(
+            columns_attribute(doc, 3),
+            Columns::Widths {
+                line: 4,
+                values: vec!["1".to_string(), "2".to_string()]
+            }
+        );
+        assert_eq!(
+            with_columns(
+                "[cols=\"1,2\",options=\"header\"]",
+                &["1".to_string(), "1".to_string()]
+            ),
+            "[cols=\"1,1\",options=\"header\"]"
+        );
+    }
+
+    #[test]
+    fn leaves_alone_the_column_specs_it_cannot_keep_in_step() {
+        let repeated = "= T\n\n[cols=\"3*\"]\n|===\n| a\n|===\n";
+        let aligned = "= T\n\n[cols=\"^1,>2\"]\n|===\n| a\n|===\n";
+        let none = "= T\n\n|===\n| a\n|===\n";
+
+        assert_eq!(columns_attribute(repeated, 3), Columns::Opaque);
+        assert_eq!(columns_attribute(aligned, 3), Columns::Opaque);
+        assert_eq!(columns_attribute(none, 3), Columns::Implicit);
+    }
+
+    #[test]
+    fn removes_a_whole_table() {
+        let doc = "= T\n\nBefore\n\n.A table\n|===\n| a\n|===\n\nAfter\n";
+        let range = table_block_range(doc, 5).expect("a table");
+
+        assert_eq!(range, LineRange { start: 5, end: 8 });
+        assert_eq!(remove_lines(doc, range), "= T\n\nBefore\n\n\nAfter\n");
     }
 
     #[test]

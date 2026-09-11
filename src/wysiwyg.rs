@@ -56,7 +56,11 @@ pub enum Kind {
     /// of [`source::ADMONITIONS`].
     Admonition(&'static str),
     /// A cell of a table. Every cell writes the whole table back.
-    Table,
+    Table {
+        /// Whether the column count is pinned by a `cols` attribute that this
+        /// module will not rewrite.
+        fixed_columns: bool,
+    },
 }
 
 /// Start line of the source the block was rendered from.
@@ -76,6 +80,9 @@ const PREFIX: &str = "data-edit-prefix";
 const LEAD: &str = "data-edit-lead";
 /// How a table's rows were laid out in the source.
 const SHAPE: &str = "data-edit-shape";
+/// Marks a table whose `cols` attribute cannot be kept in step, and whose
+/// columns therefore cannot be changed here.
+const FIXED: &str = "data-edit-fixed-columns";
 
 /// Explains why a block that looks editable is not.
 const REFUSED: &str = "This block can only be edited in source mode";
@@ -165,10 +172,21 @@ pub fn mark_editable(content: &Element, src: &str) {
         // A cell has no line of its own, so each carries the range of the rows
         // as a whole and writes all of them back.
         let shape = table::encode(&shape);
+        let fixed = source::columns_attribute(src, line) == source::Columns::Opaque;
+
         for row in table::rows_of(&table) {
             for cell in table::cells_of(&row) {
                 let _ = cell.set_attribute(SHAPE, &shape);
-                make_editable(&cell, range, Kind::Table);
+                if fixed {
+                    let _ = cell.set_attribute(FIXED, "true");
+                }
+                make_editable(
+                    &cell,
+                    range,
+                    Kind::Table {
+                        fixed_columns: fixed,
+                    },
+                );
             }
         }
     }
@@ -385,7 +403,9 @@ fn kind_of(block: &Element) -> Kind {
     }
 
     if block.has_attribute(SHAPE) {
-        return Kind::Table;
+        return Kind::Table {
+            fixed_columns: block.has_attribute(FIXED),
+        };
     }
 
     if let Some(label) = block
@@ -465,6 +485,107 @@ where
     ));
 
     rerender(Some(first));
+}
+
+/// Adds a column beside the focused cell's column, or takes that column away.
+///
+/// A `cols` attribute describes the columns, so it has to change with them.
+pub fn table_column<R>(document: &Document, source: RwSignal<String>, add: bool, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let Some(cell) = focused(document).filter(|cell| cell.has_attribute(SHAPE)) else {
+        return;
+    };
+    let (Some(table), Some((_, column)), Some(block)) = (
+        table_of_cell(&cell),
+        table::position(&cell),
+        table_of_cell(&cell).and_then(|table| line_of(&table)),
+    ) else {
+        return;
+    };
+
+    let columns = table::columns(&table).max(1);
+    if !add && columns <= 1 {
+        // The last column is the table.
+        return;
+    }
+
+    let mut cells = table::cells_from_dom(&table);
+    let rows = cells.len().div_ceil(columns);
+
+    // From the last row up, so that the indices ahead stay put.
+    for row in (0..rows).rev() {
+        let at = row * columns + column;
+        if add {
+            let after = (at + 1).min(cells.len());
+            cells.insert(after, String::new());
+        } else if at < cells.len() {
+            cells.remove(at);
+        }
+    }
+
+    let widened = if add { columns + 1 } else { columns - 1 };
+    let (Some(first), Some(last)) = (attr(&cell, LINE), attr(&cell, END)) else {
+        return;
+    };
+
+    let rows_text = table::to_asciidoc(
+        &cells,
+        &table::decode(&cell.get_attribute(SHAPE).unwrap_or_default()),
+        widened,
+        table::has_header(&table),
+    );
+
+    let edited = source::replace(
+        &source.get_untracked(),
+        LineRange {
+            start: first,
+            end: last,
+        },
+        &rows_text,
+    );
+
+    // The attribute sits above the rows, so its line is unmoved by the rewrite.
+    let edited = match source::columns_attribute(&source.get_untracked(), block) {
+        source::Columns::Widths { line, mut values } if values.len() == columns => {
+            if add {
+                values.insert(column + 1, "1".to_string());
+            } else {
+                values.remove(column);
+            }
+
+            let attribute = source::text_of(&edited, LineRange::single(line));
+            source::replace(
+                &edited,
+                LineRange::single(line),
+                &source::with_columns(&attribute, &values),
+            )
+        }
+        _ => edited,
+    };
+
+    source.set(edited);
+    rerender(Some(first));
+}
+
+/// Removes the focused cell's table outright.
+pub fn remove_table<R>(document: &Document, source: RwSignal<String>, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let Some(cell) = focused(document).filter(|cell| cell.has_attribute(SHAPE)) else {
+        return;
+    };
+    let Some(block) = table_of_cell(&cell).and_then(|table| line_of(&table)) else {
+        return;
+    };
+    let Some(range) = source::table_block_range(&source.get_untracked(), block) else {
+        return;
+    };
+
+    source.set(source::remove_lines(&source.get_untracked(), range));
+    rerender(None);
 }
 
 /// The whole table a cell belongs to, written out as rows.
@@ -1120,7 +1241,7 @@ fn split_block<R>(
 
     // A title belongs to the block below it; splitting it would put a stray
     // paragraph between the two. A table cell has no line to split at all.
-    if matches!(kind_of(block), Kind::Title | Kind::Table) {
+    if matches!(kind_of(block), Kind::Title | Kind::Table { .. }) {
         return;
     }
 

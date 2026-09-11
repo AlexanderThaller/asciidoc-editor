@@ -56,6 +56,9 @@ body {
 }
 .button:hover { border-color: var(--accent); color: #fff; }
 .button.active { background: var(--accent); border-color: var(--accent); color: #10151c; }
+.button.danger { border-color: #5b3138; color: #ff9d9d; }
+.button.danger:hover { background: #4a262c; border-color: #8b4a52; color: #fff; }
+
 .button:disabled { opacity: 0.35; cursor: default; }
 .button:disabled:hover { border-color: var(--border); color: var(--fg); }
 
