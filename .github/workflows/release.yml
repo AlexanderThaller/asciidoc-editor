@@ -67,5 +67,12 @@ jobs:
             exit 1
           fi
 
+          # Whether GitHub handed this job the means to mint an OIDC token.
+          # Never the token itself, only that it is there.
+          echo "OIDC endpoint offered: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          echo "OIDC request token:   ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
+          echo "repository:           $GITHUB_REPOSITORY"
+          echo "workflow file:        ${GITHUB_WORKFLOW_REF##*/}"
           echo "npm $(nix develop --command npm --version)"
+
           nix develop --command npm publish ./pkg
