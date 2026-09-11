@@ -3,6 +3,7 @@
 //! Only the in-memory entry points are used. `convert_file`/`load_file` compile
 //! for wasm but hit `std::fs`, which does not exist in the browser.
 
+use std::sync::OnceLock;
 use asciidoc_html5::{Options, ReferenceTime, SafeMode};
 
 /// Body-only HTML for the preview pane, annotated with `data-source-line`.
@@ -87,6 +88,27 @@ pub fn render_standalone(src: &str) -> String {
     asciidoc_html5::convert_with(src, &opts)
 }
 
+/// Asciidoctor's own stylesheet, taken back out of a standalone render.
+///
+/// The renderer embeds this already and picks it whenever the caller supplies
+/// no stylesheet of its own, so the string is in the wasm either way. Keeping
+/// a second copy to style the preview with would be 29 KB spent on nothing.
+///
+/// Rendering an empty document is the only way to it: the constant is private
+/// to the renderer, and `Options::stylesheet_content` only sets one.
+pub fn stylesheet() -> &'static str {
+    static EXTRACTED: OnceLock<String> = OnceLock::new();
+
+    EXTRACTED.get_or_init(|| {
+        let html = render_standalone("");
+
+        html.split_once("<style>")
+            .and_then(|(_, rest)| rest.split_once("</style>"))
+            .map(|(css, _)| css.trim().to_string())
+            .unwrap_or_default()
+    })
+}
+
 /// Turns a `WarningType` debug string into something readable in a status bar:
 /// `UnterminatedDelimitedBlock` -> `unterminated delimited block`.
 ///
@@ -124,6 +146,15 @@ pub struct Warning {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stylesheet_can_be_taken_back_out_of_a_render() {
+        let css = stylesheet();
+
+        assert!(css.len() > 20_000, "only got {} bytes", css.len());
+        assert!(css.starts_with("/*! Asciidoctor default stylesheet"));
+        assert!(css.contains(".admonitionblock"), "not the whole stylesheet");
+    }
 
     #[test]
     fn renders_body_only_with_source_lines() {
@@ -187,3 +218,4 @@ mod tests {
         assert!(warnings[0].line > 0);
     }
 }
+

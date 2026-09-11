@@ -47,15 +47,12 @@ fn icon_for(label: &str) -> &'static str {
 const RENDER_DEBOUNCE: Duration = Duration::from_millis(150);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 
-/// Asciidoctor's own stylesheet, built in so that an embedding page has
-/// nothing to serve alongside the editor.
-const PREVIEW_STYLESHEET: &str = include_str!("../assets/asciidoctor-default.css");
-
 /// The preview iframe is built once and then mutated in place. Re-assigning
 /// `srcdoc` would reload it and throw away the scroll position on every render.
 fn preview_shell() -> String {
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><style>{PREVIEW_STYLESHEET}</style>{PREVIEW_STYLE}</head><body class=\"article\"><div id=\"content\"></div></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><style>{}</style>{PREVIEW_STYLE}</head><body class=\"article\"><div id=\"content\"></div></body></html>",
+        render::stylesheet()
     )
 }
 

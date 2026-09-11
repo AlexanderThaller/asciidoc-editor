@@ -36,7 +36,10 @@ if [ -z "$optimiser" ] && command -v wasm-opt >/dev/null; then
 fi
 
 if [ -n "$optimiser" ]; then
-  "$optimiser" -Oz --strip-debug \
+  # --converge repeats until nothing more comes off; the strips drop sections
+  # a browser never reads.
+  "$optimiser" -Oz --converge --strip-debug --strip-producers \
+    --strip-target-features \
     pkg/asciidoc_editor_bg.wasm -o pkg/asciidoc_editor_bg.wasm
 else
   echo "wasm-opt not found: shipping the unoptimised wasm" >&2
