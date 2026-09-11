@@ -8,8 +8,6 @@ use web_sys::{Element, Event, HtmlIFrameElement, HtmlInputElement, HtmlTextAreaE
 
 use crate::{highlight, render, source, storage, sync, wysiwyg};
 
-const SAMPLE: &str = include_str!("../assets/sample.adoc");
-
 /// A document as it stood, and where the caret was at the time.
 #[derive(Clone, Debug)]
 struct Step {
@@ -49,11 +47,19 @@ fn icon_for(label: &str) -> &'static str {
 const RENDER_DEBOUNCE: Duration = Duration::from_millis(150);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 
+/// Asciidoctor's own stylesheet, built in so that an embedding page has
+/// nothing to serve alongside the editor.
+const PREVIEW_STYLESHEET: &str = include_str!("../assets/asciidoctor-default.css");
+
 /// The preview iframe is built once and then mutated in place. Re-assigning
 /// `srcdoc` would reload it and throw away the scroll position on every render.
-const PREVIEW_SHELL: &str = r#"<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="/assets/asciidoctor-default.css">
-<style>
+fn preview_shell() -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><style>{PREVIEW_STYLESHEET}</style>{PREVIEW_STYLE}</head><body class=\"article\"><div id=\"content\"></div></body></html>"
+    )
+}
+
+const PREVIEW_STYLE: &str = r#"<style>
 body{margin:0;padding:1.25rem 1.5rem}
 /*
  * What can be edited, and what is being edited. An image is focusable without
@@ -82,8 +88,7 @@ body{margin:0;padding:1.25rem 1.5rem}
 /* Where a new block would be added, while the panel asking for one is open. */
 [data-edit-insert-after]{position:relative}
 [data-edit-insert-after]::after{content:"";position:absolute;left:0;right:0;bottom:-.55rem;height:2px;border-radius:2px;background:#7fb4ff}
-</style></head>
-<body class="article"><div id="content"></div></body></html>"#;
+</style>"#;
 
 /// Which surface the document is edited through.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -94,10 +99,13 @@ pub enum Mode {
     Source,
 }
 
+/// The editor, over a document the caller owns.
+///
+/// `autosave` names a `localStorage` key to keep the document under; without
+/// one nothing is written, which is what an embedding page usually wants.
 #[component]
-pub fn App() -> impl IntoView {
-    let mode = RwSignal::new(Mode::Rich);
-    let source = RwSignal::new(storage::load().unwrap_or_else(|| SAMPLE.to_string()));
+pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> impl IntoView {
+    let mode = RwSignal::new(if rich { Mode::Rich } else { Mode::Source });
     // Trails `source` by the debounce interval; drives the expensive render.
     let settled = RwSignal::new(source.get_untracked());
     let warnings = RwSignal::new(Vec::<render::Warning>::new());
@@ -180,9 +188,12 @@ pub fn App() -> impl IntoView {
         if let Some(handle) = save_timer.get_value() {
             handle.clear();
         }
-        save_timer.set_value(
-            set_timeout_with_handle(move || storage::save(&current), AUTOSAVE_DEBOUNCE).ok(),
-        );
+        if let Some(key) = autosave.clone() {
+            save_timer.set_value(
+                set_timeout_with_handle(move || storage::save(&key, &current), AUTOSAVE_DEBOUNCE)
+                    .ok(),
+            );
+        }
     });
 
     // A toolbar click must not take focus away from the block being edited,
@@ -1142,7 +1153,7 @@ pub fn App() -> impl IntoView {
             <section class="preview">
                 <iframe
                     node_ref=frame
-                    srcdoc=PREVIEW_SHELL
+                    srcdoc=preview_shell()
                     on:load=move |_| {
                         attach_click_to_locate(frame, textarea, source, mode);
 

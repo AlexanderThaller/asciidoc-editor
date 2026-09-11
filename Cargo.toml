@@ -3,6 +3,9 @@ name = "asciidoc-editor"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 asciidoc-html5 = "0.2.2"
 console_error_panic_hook = "0.1.7"

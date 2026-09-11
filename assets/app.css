@@ -1,4 +1,4 @@
-:root {
+.asciidoc-editor {
   --bg: #1b1f24;
   --bg-raised: #22272e;
   --border: #343b45;
@@ -11,28 +11,29 @@
   --editor-pad: 1rem;
 }
 
-* { box-sizing: border-box; }
+.asciidoc-editor, .asciidoc-editor * { box-sizing: border-box; }
 
-html, body {
+/*
+ * The editor fills whatever it is put in. Flex rather than fixed rows: the
+ * context bar is only there in rich text mode, and the layout must not depend
+ * on how many rows exist. Positioned, so the panels hang inside it rather
+ * than over the page.
+ */
+.asciidoc-editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   height: 100%;
-  margin: 0;
+  min-height: 20rem;
   background: var(--bg);
   color: var(--fg);
   font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-/*
- * Flex rather than fixed grid rows: the context bar is only present in rich
- * text mode, and the layout must not depend on how many rows exist.
- */
-body {
-  display: flex;
-  flex-direction: column;
-}
-
 /* ---- toolbar ---- */
 
-.toolbar {
+.asciidoc-editor .toolbar {
   flex: none;
   display: flex;
   align-items: center;
@@ -45,7 +46,7 @@ body {
 .brand { font-weight: 600; letter-spacing: 0.02em; }
 .spacer { flex: 1; }
 
-.button {
+.asciidoc-editor .button {
   padding: 0.3rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -64,14 +65,14 @@ body {
 
 .modes, .tools { display: flex; gap: 0.25rem; }
 
-.separator {
+.asciidoc-editor .separator {
   width: 1px;
   align-self: stretch;
   margin: 0 0.25rem;
   background: var(--border);
 }
 
-.button.icon {
+.asciidoc-editor .button.icon {
   min-width: 1.9rem;
   padding: 0.3rem 0.4rem;
   text-align: center;
@@ -80,7 +81,7 @@ body {
    * symbols fall back. `inherit` cannot appear in a font-family list — it
    * invalidates the whole declaration — so the stack is repeated.
    */
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif, "Noto Color Emoji",
+.asciidoc-editor font-family: system-ui, .asciidoc-editor -apple-system, .asciidoc-editor "Segoe UI", .asciidoc-editor sans-serif, .asciidoc-editor "Noto Color Emoji",
     "Apple Color Emoji", "Segoe UI Emoji";
 }
 .button.icon code { font-size: 11px; }
@@ -90,10 +91,10 @@ body {
  * The image panel hangs below the toolbars rather than sitting in the column,
  * so opening it does not push the document down.
  */
-.panel {
+.asciidoc-editor .panel {
   position: absolute;
   z-index: 10;
-  top: 5.4rem;
+  top: 5.2rem;
   left: 0;
   right: 0;
   display: flex;
@@ -105,7 +106,7 @@ body {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
-.panel label {
+.asciidoc-editor .panel label {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -113,14 +114,14 @@ body {
   color: var(--fg-dim);
 }
 
-.panel label.button {
+.asciidoc-editor .panel label.button {
   flex-direction: row;
   align-items: center;
   font-size: inherit;
   color: var(--fg);
 }
 
-.panel input[type="text"] {
+.asciidoc-editor .panel input[type="text"] {
   min-width: 18rem;
   padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);
@@ -135,7 +136,7 @@ body {
 /* ---- panes ---- */
 
 /* Context bar: what is focused, and what can be done to it. */
-.toolbar.context {
+.asciidoc-editor .toolbar.context {
   /*
    * Tall enough for a row of buttons whether or not any are showing, so that
    * focusing a block cannot push the document down. Border-box, so this counts
@@ -148,7 +149,7 @@ body {
   background: #1e242c;
 }
 
-.chip {
+.asciidoc-editor .chip {
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: #2b313a;
@@ -160,7 +161,7 @@ body {
 
 .hint { color: var(--fg-dim); font-style: italic; }
 
-.panes {
+.asciidoc-editor .panes {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 1px 1fr;
@@ -174,7 +175,7 @@ body {
  * preview iframe — and the editing state inside it — survives the switch.
  */
 .panes.rich { grid-template-columns: 1fr; }
-.panes.rich .editor,
+.asciidoc-editor .panes.rich .editor,
 .panes.rich .divider { display: none; }
 
 .preview { min-width: 0; background: #fff; }
@@ -182,7 +183,7 @@ body {
 
 /* ---- editor: transparent textarea over a highlighted <pre> ---- */
 
-.editor {
+.asciidoc-editor .editor {
   position: relative;
   min-width: 0;
   overflow: hidden;
@@ -192,8 +193,8 @@ body {
  * Every property that affects text layout must be identical on both layers,
  * or the highlight drifts out of alignment with the caret.
  */
-.editor .overlay,
-.editor .source {
+.asciidoc-editor .editor .overlay,
+.asciidoc-editor .editor .source {
   position: absolute;
   inset: 0;
   margin: 0;
@@ -208,13 +209,13 @@ body {
   word-break: normal;
 }
 
-.editor .overlay {
+.asciidoc-editor .editor .overlay {
   overflow: hidden;
   pointer-events: none;
   color: var(--fg);
 }
 
-.editor .source {
+.asciidoc-editor .editor .source {
   resize: none;
   overflow-y: auto;
   background: transparent;
@@ -243,7 +244,7 @@ body {
 
 /* ---- status bar ---- */
 
-.status {
+.asciidoc-editor .status {
   flex: none;
   padding: 0.35rem 0.75rem;
   background: var(--bg-raised);
