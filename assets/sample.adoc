@@ -16,6 +16,7 @@ in the preview to jump the caret to the line that produced it.
 * Live preview with `data-source-line` scroll sync
 * Syntax highlighting in the editor pane
 * Autosave to local storage, import and export
+* Images, linked or embedded in the document itself
 
 == Blocks
 
@@ -44,6 +45,9 @@ WARNING: Blocks that cannot be written back stay read-only.
 | asciidoc-html5
 | Renders that model as Asciidoctor-compatible HTML5
 |===
+
+.A cat, by way of cataas.com
+image::https://cataas.com/cat?width=420[A cat]
 
 [quote,Eric Scouten]
 ____
