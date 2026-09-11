@@ -30,7 +30,13 @@ cargo build --release --lib --target wasm32-unknown-unknown
   target/wasm32-unknown-unknown/release/asciidoc_editor.wasm
 
 # Shrinking matters here: the page pays for every byte on first load.
-optimiser=$(find "$HOME/.cache/trunk" -name wasm-opt -type f 2>/dev/null | head -1)
+# Trunk keeps a wasm-opt in its cache, which is the one to prefer here. A
+# machine that has never run trunk has no such directory — `find` then fails,
+# and under `set -o pipefail` that would end the build with no explanation.
+optimiser=""
+if [ -d "$HOME/.cache/trunk" ]; then
+  optimiser=$(find "$HOME/.cache/trunk" -name wasm-opt -type f | head -1 || true)
+fi
 if [ -z "$optimiser" ] && command -v wasm-opt >/dev/null; then
   optimiser=wasm-opt
 fi
@@ -46,8 +52,13 @@ if [ -n "$optimiser" ]; then
     "$optimiser" -Oz --strip-debug \
       pkg/asciidoc_editor_bg.wasm -o pkg/asciidoc_editor_bg.wasm
   fi
-else
+elif [ "${ALLOW_UNOPTIMISED:-}" = "1" ]; then
   echo "wasm-opt not found: shipping the unoptimised wasm" >&2
+else
+  # Without it the wasm is around three times the size. Publishing that by
+  # accident is worse than failing here, so this has to be asked for.
+  echo "wasm-opt not found; install binaryen, or set ALLOW_UNOPTIMISED=1" >&2
+  exit 1
 fi
 
 # ---- npm metadata ------------------------------------------------------
