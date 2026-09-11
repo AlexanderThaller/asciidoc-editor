@@ -41,10 +41,19 @@
   padding: 0.5rem 0.75rem;
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border);
+  /* Embedded, the editor is often narrower than the buttons need. */
+  flex-wrap: wrap;
+  row-gap: 0.4rem;
 }
 
-.brand { font-weight: 600; letter-spacing: 0.02em; }
-.spacer { flex: 1; }
+/* Nothing in a toolbar squashes; the bar grows or scrolls instead. */
+.asciidoc-editor .toolbar *:not(.spacer) {
+  flex: none;
+  white-space: nowrap;
+}
+
+.asciidoc-editor .brand { font-weight: 600; letter-spacing: 0.02em; }
+.asciidoc-editor .spacer { flex: 1; }
 
 .asciidoc-editor .button {
   padding: 0.3rem 0.7rem;
@@ -55,15 +64,15 @@
   font: inherit;
   cursor: pointer;
 }
-.button:hover { border-color: var(--accent); color: #fff; }
-.button.active { background: var(--accent); border-color: var(--accent); color: #10151c; }
-.button.danger { border-color: #5b3138; color: #ff9d9d; }
-.button.danger:hover { background: #4a262c; border-color: #8b4a52; color: #fff; }
+.asciidoc-editor .button:hover { border-color: var(--accent); color: #fff; }
+.asciidoc-editor .button.active { background: var(--accent); border-color: var(--accent); color: #10151c; }
+.asciidoc-editor .button.danger { border-color: #5b3138; color: #ff9d9d; }
+.asciidoc-editor .button.danger:hover { background: #4a262c; border-color: #8b4a52; color: #fff; }
 
-.button:disabled { opacity: 0.35; cursor: default; }
-.button:disabled:hover { border-color: var(--border); color: var(--fg); }
+.asciidoc-editor .button:disabled { opacity: 0.35; cursor: default; }
+.asciidoc-editor .button:disabled:hover { border-color: var(--border); color: var(--fg); }
 
-.modes, .tools { display: flex; gap: 0.25rem; }
+.asciidoc-editor .modes, .asciidoc-editor .tools { display: flex; gap: 0.25rem; }
 
 .asciidoc-editor .separator {
   width: 1px;
@@ -81,11 +90,11 @@
    * symbols fall back. `inherit` cannot appear in a font-family list — it
    * invalidates the whole declaration — so the stack is repeated.
    */
-.asciidoc-editor font-family: system-ui, .asciidoc-editor -apple-system, .asciidoc-editor "Segoe UI", .asciidoc-editor sans-serif, .asciidoc-editor "Noto Color Emoji",
-    "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif,
+    "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji";
 }
-.button.icon code { font-size: 11px; }
-.button input[type="file"] { display: none; }
+.asciidoc-editor .button.icon code { font-size: 11px; }
+.asciidoc-editor .button input[type="file"] { display: none; }
 
 /*
  * The image panel hangs below the toolbars rather than sitting in the column,
@@ -130,8 +139,8 @@
   color: var(--fg);
   font: inherit;
 }
-.panel input[type="text"]:focus { outline: none; border-color: var(--accent); }
-.panel input[type="file"] { display: none; }
+.asciidoc-editor .panel input[type="text"]:focus { outline: none; border-color: var(--accent); }
+.asciidoc-editor .panel input[type="file"] { display: none; }
 
 /* ---- panes ---- */
 
@@ -147,6 +156,14 @@
   padding-top: 0.3rem;
   padding-bottom: 0.3rem;
   background: #1e242c;
+  /*
+   * This bar alone scrolls rather than wraps. Its buttons change with what is
+   * focused, so wrapping would grow it a row the moment a block is clicked,
+   * pushing the document down — the very thing its fixed height prevents.
+   */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .asciidoc-editor .chip {
@@ -159,7 +176,7 @@
   letter-spacing: 0.04em;
 }
 
-.hint { color: var(--fg-dim); font-style: italic; }
+.asciidoc-editor .hint { color: var(--fg-dim); font-style: italic; }
 
 .asciidoc-editor .panes {
   flex: 1;
@@ -168,18 +185,18 @@
   min-height: 0;
 }
 
-.divider { background: var(--border); }
+.asciidoc-editor .divider { background: var(--border); }
 
 /*
  * Rich-text mode hides the source pane rather than unmounting it, so the
  * preview iframe — and the editing state inside it — survives the switch.
  */
-.panes.rich { grid-template-columns: 1fr; }
+.asciidoc-editor .panes.rich { grid-template-columns: 1fr; }
 .asciidoc-editor .panes.rich .editor,
-.panes.rich .divider { display: none; }
+.asciidoc-editor .panes.rich .divider { display: none; }
 
-.preview { min-width: 0; background: #fff; }
-.preview iframe { width: 100%; height: 100%; border: 0; display: block; }
+.asciidoc-editor .preview { min-width: 0; background: #fff; }
+.asciidoc-editor .preview iframe { width: 100%; height: 100%; border: 0; display: block; }
 
 /* ---- editor: transparent textarea over a highlighted <pre> ---- */
 
@@ -222,25 +239,25 @@
   color: transparent;
   caret-color: var(--accent);
 }
-.editor .source:focus { outline: none; }
-.editor .source::selection { background: rgba(127, 180, 255, 0.28); }
+.asciidoc-editor .editor .source:focus { outline: none; }
+.asciidoc-editor .editor .source::selection { background: rgba(127, 180, 255, 0.28); }
 
 /* ---- token colours ---- */
 
-.ad-heading     { color: #ff9d6b; font-weight: 600; }
-.ad-delim       { color: #6b7684; }
-.ad-verbatim    { color: #9ecbff; }
-.ad-comment     { color: #6b7684; font-style: italic; }
-.ad-attr-entry  { color: #d2a8ff; }
-.ad-attr-list   { color: #d2a8ff; }
-.ad-block-title { color: #e6c07b; font-style: italic; }
-.ad-admonition  { color: #ff7b72; font-weight: 600; }
-.ad-marker      { color: #7fb4ff; font-weight: 600; }
-.ad-bold        { color: #f0f4f9; font-weight: 600; }
-.ad-italic      { color: #c8d2de; font-style: italic; }
-.ad-code        { color: #a5d6a7; }
-.ad-mac, .ad-url { color: #7fb4ff; text-decoration: underline; }
-.ad-attr        { color: #d2a8ff; }
+.asciidoc-editor .ad-heading     { color: #ff9d6b; font-weight: 600; }
+.asciidoc-editor .ad-delim       { color: #6b7684; }
+.asciidoc-editor .ad-verbatim    { color: #9ecbff; }
+.asciidoc-editor .ad-comment     { color: #6b7684; font-style: italic; }
+.asciidoc-editor .ad-attr-entry  { color: #d2a8ff; }
+.asciidoc-editor .ad-attr-list   { color: #d2a8ff; }
+.asciidoc-editor .ad-block-title { color: #e6c07b; font-style: italic; }
+.asciidoc-editor .ad-admonition  { color: #ff7b72; font-weight: 600; }
+.asciidoc-editor .ad-marker      { color: #7fb4ff; font-weight: 600; }
+.asciidoc-editor .ad-bold        { color: #f0f4f9; font-weight: 600; }
+.asciidoc-editor .ad-italic      { color: #c8d2de; font-style: italic; }
+.asciidoc-editor .ad-code        { color: #a5d6a7; }
+.asciidoc-editor .ad-mac, .asciidoc-editor .ad-url { color: #7fb4ff; text-decoration: underline; }
+.asciidoc-editor .ad-attr        { color: #d2a8ff; }
 
 /* ---- status bar ---- */
 
@@ -255,4 +272,4 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.status .warn { color: #e6c07b; }
+.asciidoc-editor .status .warn { color: #e6c07b; }

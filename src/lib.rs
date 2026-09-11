@@ -40,6 +40,9 @@ pub const SAMPLE: &str = include_str!("../assets/sample.adoc");
 const STYLE: &str = include_str!("../assets/app.css");
 const STYLE_ID: &str = "asciidoc-editor-style";
 
+/// What the styling hangs off, put on the element the editor is given.
+const CLASS: &str = "asciidoc-editor";
+
 /// A mounted editor.
 ///
 /// Hold on to it: letting it go takes the editor off the page, which is what
@@ -49,6 +52,8 @@ pub struct Editor {
     source: RwSignal<String>,
     /// Kept so that unmounting can happen on demand rather than never.
     mounted: Option<Box<dyn Any>>,
+    /// Kept so that destroying gives the element back as it was found.
+    host: HtmlElement,
 }
 
 #[wasm_bindgen]
@@ -75,9 +80,10 @@ impl Editor {
         });
     }
 
-    /// Takes the editor off the page.
+    /// Takes the editor off the page, leaving the element as it was found.
     pub fn destroy(&mut self) {
         self.mounted = None;
+        let _ = self.host.class_list().remove_1(CLASS);
     }
 }
 
@@ -96,12 +102,14 @@ pub fn mount(target: &JsValue, options: Option<js_sys::Object>) -> Result<Editor
 
     let autosave = string_option(&options, "autosave");
     let value = string_option(&options, "value")
-        .or_else(|| autosave.as_deref().and_then(|key| storage::load(key)))
+        .or_else(|| autosave.as_deref().and_then(storage::load))
         .unwrap_or_else(|| SAMPLE.to_string());
     let rich = bool_option(&options, "richText").unwrap_or(true);
 
     add_style(&host)?;
-    host.set_class_name("asciidoc-editor");
+    // Added rather than assigned: the page may well have dressed the element
+    // it is handing over, and those classes are not the editor's to discard.
+    host.class_list().add_1(CLASS)?;
 
     // The signal is made inside the mount so that it belongs to the same
     // reactive owner as everything reading it; the view runs before this
@@ -109,7 +117,7 @@ pub fn mount(target: &JsValue, options: Option<js_sys::Object>) -> Result<Editor
     let carried: Rc<RefCell<Option<RwSignal<String>>>> = Rc::new(RefCell::new(None));
     let taken = Rc::clone(&carried);
 
-    let mounted = leptos::mount::mount_to(host, move || {
+    let mounted = leptos::mount::mount_to(host.clone(), move || {
         let source = RwSignal::new(value.clone());
         *taken.borrow_mut() = Some(source);
 
@@ -124,6 +132,7 @@ pub fn mount(target: &JsValue, options: Option<js_sys::Object>) -> Result<Editor
     Ok(Editor {
         source,
         mounted: Some(Box::new(mounted)),
+        host,
     })
 }
 

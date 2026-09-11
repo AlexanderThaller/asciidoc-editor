@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AsciiDoc editor, embedded</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        background: #f6f7f9;
+        color: #23272e;
+        font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      main {
+        max-width: 60rem;
+        margin: 0 auto;
+      }
+
+      /* The editor fills whatever it is given; give it a height. */
+      #editor {
+        height: 34rem;
+        border: 1px solid #d3d8e0;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        margin: 1rem 0;
+      }
+
+      button {
+        padding: 0.4rem 0.8rem;
+        border: 1px solid #d3d8e0;
+        border-radius: 6px;
+        background: #fff;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      #saved {
+        color: #6b7280;
+        font-size: 13px;
+      }
+
+      .panel {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        border: 1px dashed #c3cad4;
+        border-radius: 6px;
+      }
+
+      .hint {
+        margin: 0 0 0.5rem;
+      }
+
+      pre {
+        max-height: 12rem;
+        overflow: auto;
+        padding: 0.75rem;
+        background: #fff;
+        border: 1px solid #d3d8e0;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>An AsciiDoc editor on someone else's page</h1>
+
+      <div id="editor"></div>
+
+      <div class="row">
+        <button class="button" id="read">Read the document</button>
+        <button class="button" id="replace">Replace it</button>
+        <button class="button" id="remove">Take the editor away</button>
+        <span class="status" id="saved"></span>
+      </div>
+
+      <pre id="out">The document appears here.</pre>
+
+      <!--
+        The editor's styling is scoped to its own container. These carry the
+        class names it uses internally on purpose: if any of them turns dark,
+        something has escaped.
+      -->
+      <div class="panel">
+        <p class="hint">A paragraph of the page's own, in a panel.</p>
+        <div class="editor preview">An editor and a preview belonging to the page.</div>
+      </div>
+    </main>
+
+    <script type="module">
+      import init, { mount } from "../pkg/asciidoc_editor.js";
+
+      await init();
+
+      const editor = mount("#editor", {
+        value: "= Embedded\n\nThis editor was put here by the page around it.\n\n* It carries its own styling\n* It reports what you write\n",
+        richText: true,
+      });
+
+      const out = document.getElementById("out");
+      const saved = document.getElementById("saved");
+
+      // Told whenever the document changes — hand it to whatever stores it.
+      editor.onChange((document) => {
+        saved.textContent = `${document.length} characters`;
+      });
+
+      document.getElementById("read").onclick = () => {
+        out.textContent = editor.value();
+      };
+
+      document.getElementById("replace").onclick = () => {
+        editor.setValue("= Replaced\n\nSet from the page, through the handle.\n");
+      };
+
+      document.getElementById("remove").onclick = () => {
+        editor.destroy();
+        saved.textContent = "gone";
+      };
+    </script>
+  </body>
+</html>
