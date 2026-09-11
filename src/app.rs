@@ -56,6 +56,15 @@ const PREVIEW_SHELL: &str = r#"<!doctype html><html><head><meta charset="utf-8">
 <style>
 body{margin:0;padding:1.25rem 1.5rem}
 /*
+ * What can be edited, and what is being edited. An image is focusable without
+ * being an editing host, so it gets none of the ring a browser draws around
+ * one of those by itself.
+ */
+[data-edit-line]{border-radius:3px}
+[data-edit-line]:hover{background:rgba(127,180,255,.08)}
+[data-edit-line]:focus{outline:2px solid rgba(127,180,255,.55);outline-offset:4px}
+[data-edit-line]:focus-visible{outline:2px solid rgba(127,180,255,.55);outline-offset:4px}
+/*
  * Admonition icons. The renderer only emits Font Awesome glyphs when the
  * document may enable `icons`, which safe mode forbids, and a webfont would
  * not load offline anyway — so the label draws its own symbol and then hides
