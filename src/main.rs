@@ -6,6 +6,7 @@ mod render;
 mod source;
 mod storage;
 mod sync;
+mod table;
 mod wysiwyg;
 
 fn main() {

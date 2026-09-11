@@ -168,6 +168,12 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    let apply_row = move |add: bool| {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::table_row(&document, source, add, &rerender);
+        }
+    };
+
     let apply_indent = move |outdent: bool| {
         if let Some(document) = preview_document(frame) {
             wysiwyg::reindent_focused(&document, source, outdent);
@@ -268,7 +274,9 @@ pub fn App() -> impl IntoView {
                                 .is_some_and(|block| {
                                     matches!(
                                         block.kind,
-                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition(_)
+                                        wysiwyg::Kind::Title
+                                            | wysiwyg::Kind::Admonition(_)
+                                            | wysiwyg::Kind::Table
                                     )
                                 })
                         }
@@ -310,7 +318,9 @@ pub fn App() -> impl IntoView {
                                 .is_some_and(|block| {
                                     matches!(
                                         block.kind,
-                                        wysiwyg::Kind::Title | wysiwyg::Kind::Admonition(_)
+                                        wysiwyg::Kind::Title
+                                            | wysiwyg::Kind::Admonition(_)
+                                            | wysiwyg::Kind::Table
                                     )
                                 })
                         }
@@ -337,6 +347,7 @@ pub fn App() -> impl IntoView {
                                     wysiwyg::Kind::List { .. }
                                         | wysiwyg::Kind::Title
                                         | wysiwyg::Kind::Admonition(_)
+                                        | wysiwyg::Kind::Table
                                 )
                             })
                         }
@@ -362,6 +373,7 @@ pub fn App() -> impl IntoView {
                                                 wysiwyg::Kind::List { .. }
                                                     | wysiwyg::Kind::Title
                                                     | wysiwyg::Kind::Admonition(_)
+                                                    | wysiwyg::Kind::Table
                                             )
                                         })
                                     }
@@ -427,6 +439,7 @@ pub fn App() -> impl IntoView {
                         let is_title = block.kind == wysiwyg::Kind::Title;
                         let is_list = matches!(block.kind, wysiwyg::Kind::List { .. });
                         let is_admonition = matches!(block.kind, wysiwyg::Kind::Admonition(_));
+                        let is_table = block.kind == wysiwyg::Kind::Table;
                         // A heading is a title already; AsciiDoc gives it none.
                         let takes_title = !matches!(block.kind, wysiwyg::Kind::Heading(_));
                         view! {
@@ -471,6 +484,26 @@ pub fn App() -> impl IntoView {
                                     on:click=move |_| apply_admonition(None)
                                 >
                                     "Remove"
+                                </button>
+                            </Show>
+
+                            <Show when=move || is_table>
+                                <span class="separator"></span>
+                                <button
+                                    class="button"
+                                    title="Add a row below this one"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_row(true)
+                                >
+                                    "+ Row"
+                                </button>
+                                <button
+                                    class="button"
+                                    title="Delete this row"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_row(false)
+                                >
+                                    "− Row"
                                 </button>
                             </Show>
 
@@ -576,6 +609,7 @@ fn describe(kind: wysiwyg::Kind) -> String {
         wysiwyg::Kind::List { ordered: true } => "Numbered list".to_string(),
         wysiwyg::Kind::Title => "Block title".to_string(),
         wysiwyg::Kind::Admonition(label) => label.to_string(),
+        wysiwyg::Kind::Table => "Table cell".to_string(),
     }
 }
 

@@ -29,6 +29,7 @@ use web_sys::{Document, Element, Event, HtmlDocument, KeyboardEvent, Node};
 use crate::{
     inline, list,
     source::{self, LineRange},
+    table,
 };
 
 /// The block the caret is currently in.
@@ -54,6 +55,8 @@ pub enum Kind {
     /// An inline admonition, such as `NOTE: mind the gap`, labelled with one
     /// of [`source::ADMONITIONS`].
     Admonition(&'static str),
+    /// A cell of a table. Every cell writes the whole table back.
+    Table,
 }
 
 /// Start line of the source the block was rendered from.
@@ -71,6 +74,8 @@ const PREFIX: &str = "data-edit-prefix";
 /// Text the source carries in front of the content but the rendering drops,
 /// such as an admonition's `NOTE: ` label.
 const LEAD: &str = "data-edit-lead";
+/// How a table's rows were laid out in the source.
+const SHAPE: &str = "data-edit-shape";
 
 /// Explains why a block that looks editable is not.
 const REFUSED: &str = "This block can only be edited in source mode";
@@ -137,6 +142,35 @@ pub fn mark_editable(content: &Element, src: &str) {
         }
 
         offer(&items, range, Kind::Body, &source::text_of(src, range));
+    }
+
+    for table in select(content, "table[data-source-line]") {
+        let (Some(line), rendered) = (line_of(&table), table::cells_from_dom(&table)) else {
+            continue;
+        };
+
+        let Some(range) = source::table_range(src, line) else {
+            continue;
+        };
+
+        // The cells must read back exactly as the source wrote them; a
+        // specifier the source carries would be dropped by rewriting.
+        let Some((written, shape)) = table::parse(&source::text_of(src, range)) else {
+            continue;
+        };
+        if rendered != written {
+            continue;
+        }
+
+        // A cell has no line of its own, so each carries the range of the rows
+        // as a whole and writes all of them back.
+        let shape = table::encode(&shape);
+        for row in table::rows_of(&table) {
+            for cell in table::cells_of(&row) {
+                let _ = cell.set_attribute(SHAPE, &shape);
+                make_editable(&cell, range, Kind::Table);
+            }
+        }
     }
 
     for block in select(content, "div.admonitionblock[data-source-line]") {
@@ -280,6 +314,10 @@ fn make_editable(element: &Element, range: LineRange, kind: Kind) {
 
 /// The block's content as AsciiDoc.
 fn serialize(element: &Element) -> String {
+    if let Some(cells) = table_of(element) {
+        return cells;
+    }
+
     if let Some(items) = list::from_element(element) {
         let marker = element
             .get_attribute(MARKER)
@@ -304,6 +342,18 @@ fn title_line_of(block: &Element) -> Option<usize> {
     // A title the block holds itself occupies the block's first line.
     if block_title_in(block).is_some() {
         return attr(block, LINE);
+    }
+
+    // A cell's own line is a row; the table's title is its caption.
+    if block.has_attribute(SHAPE) {
+        return table_of_cell(block)
+            .and_then(|table| {
+                table
+                    .query_selector(&format!("caption[{LINE}]"))
+                    .ok()
+                    .flatten()
+            })
+            .and_then(|caption| attr(&caption, LINE));
     }
 
     let beside = block.parent_element().and_then(|parent| {
@@ -334,6 +384,10 @@ fn kind_of(block: &Element) -> Kind {
         return Kind::Title;
     }
 
+    if block.has_attribute(SHAPE) {
+        return Kind::Table;
+    }
+
     if let Some(label) = block
         .get_attribute(LEAD)
         .and_then(|lead| source::admonition_label(&lead))
@@ -351,6 +405,79 @@ fn kind_of(block: &Element) -> Kind {
         0 => Kind::Body,
         level => Kind::Heading(level),
     }
+}
+
+fn table_of_cell(cell: &Element) -> Option<Element> {
+    cell.closest("table").ok()?
+}
+
+/// Adds a row under the focused cell's row, or takes that row away.
+///
+/// Either way the row count changes, so the recorded layout no longer fits and
+/// the table is written out afresh.
+pub fn table_row<R>(document: &Document, source: RwSignal<String>, add: bool, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let Some(cell) = focused(document).filter(|cell| cell.has_attribute(SHAPE)) else {
+        return;
+    };
+    let (Some(table), Some((row, _))) = (table_of_cell(&cell), table::position(&cell)) else {
+        return;
+    };
+
+    let columns = table::columns(&table).max(1);
+    let mut cells = table::cells_from_dom(&table);
+    let start = row * columns;
+
+    if add {
+        let after = (start + columns).min(cells.len());
+        for _ in 0..columns {
+            cells.insert(after, String::new());
+        }
+    } else {
+        // A table needs a row; removing the last one would leave delimiters
+        // around nothing, which is no longer a table this module can find.
+        if cells.len() <= columns {
+            return;
+        }
+        cells.drain(start..(start + columns).min(cells.len()));
+    }
+
+    let (Some(first), Some(last)) = (attr(&cell, LINE), attr(&cell, END)) else {
+        return;
+    };
+
+    let rows = table::to_asciidoc(
+        &cells,
+        &table::decode(&cell.get_attribute(SHAPE).unwrap_or_default()),
+        columns,
+        table::has_header(&table),
+    );
+
+    source.set(source::replace(
+        &source.get_untracked(),
+        LineRange {
+            start: first,
+            end: last,
+        },
+        &rows,
+    ));
+
+    rerender(Some(first));
+}
+
+/// The whole table a cell belongs to, written out as rows.
+fn table_of(cell: &Element) -> Option<String> {
+    let shape = cell.get_attribute(SHAPE)?;
+    let table = cell.closest("table").ok()??;
+
+    Some(table::to_asciidoc(
+        &table::cells_from_dom(&table),
+        &table::decode(&shape),
+        table::columns(&table),
+        table::has_header(&table),
+    ))
 }
 
 /// Whether the block is a list, whose items the browser manages itself.
@@ -992,8 +1119,8 @@ fn split_block<R>(
     let text = serialize(block);
 
     // A title belongs to the block below it; splitting it would put a stray
-    // paragraph between the two.
-    if kind_of(block) == Kind::Title {
+    // paragraph between the two. A table cell has no line to split at all.
+    if matches!(kind_of(block), Kind::Title | Kind::Table) {
         return;
     }
 

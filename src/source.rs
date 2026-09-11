@@ -190,6 +190,31 @@ pub fn list_range(src: &str, start: usize) -> Option<LineRange> {
     })
 }
 
+/// The rows between the delimiters of the table starting at `start`.
+///
+/// The delimiters and anything attached above them stay where they are; only
+/// the rows between are ever rewritten.
+pub fn table_range(src: &str, start: usize) -> Option<LineRange> {
+    let mut opening = start;
+    while is_attached(&text_of(src, LineRange::single(opening))) {
+        opening += 1;
+    }
+
+    if text_of(src, LineRange::single(opening)).trim() != "|===" {
+        return None;
+    }
+
+    let total = src.lines().count();
+    let closing = (opening + 1..=total)
+        .find(|line| text_of(src, LineRange::single(*line)).trim() == "|===")?;
+
+    // A table with no rows has nothing to address.
+    (closing > opening + 1).then_some(LineRange {
+        start: opening + 1,
+        end: closing - 1,
+    })
+}
+
 /// The source text of `range`.
 pub fn text_of(src: &str, range: LineRange) -> String {
     src.lines()
@@ -397,6 +422,20 @@ mod tests {
     #[test]
     fn inserts_a_block_past_the_end() {
         assert_eq!(insert_block("a\n", 99, "b"), "a\n\nb\n");
+    }
+
+    #[test]
+    fn finds_the_rows_between_table_delimiters() {
+        let doc = "= T\n\n.A table\n[cols=\"1,2\"]\n|===\n| a | b\n| c | d\n|===\n\nAfter\n";
+
+        assert_eq!(table_range(doc, 3), Some(LineRange { start: 6, end: 7 }));
+    }
+
+    #[test]
+    fn refuses_tables_it_cannot_address() {
+        assert_eq!(table_range("= T\n\n|===\n|===\n", 3), None, "no rows");
+        assert_eq!(table_range("= T\n\n|===\n| a\n", 3), None, "never closed");
+        assert_eq!(table_range("= T\n\nA paragraph\n", 3), None);
     }
 
     #[test]
