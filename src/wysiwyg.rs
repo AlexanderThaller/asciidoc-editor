@@ -275,10 +275,16 @@ pub fn mark_editable(content: &Element, src: &str) {
             continue;
         };
 
-        // A title inside a block that is already editable is edited through
-        // that block; marking it again would nest one editing host in
-        // another, which the browser does not honour.
-        if title.closest(&format!("[{LINE}]")).ok().flatten().is_some() {
+        // A title inside an editing host is edited through that host, since
+        // nesting one inside another is not something the browser honours. A
+        // block that is merely focusable — an image — is not one, and its
+        // title is marked in its own right.
+        if title
+            .closest("[contenteditable=\"true\"]")
+            .ok()
+            .flatten()
+            .is_some()
+        {
             continue;
         }
 
@@ -387,7 +393,13 @@ fn title_line_of(block: &Element) -> Option<usize> {
         return attr(block, LINE);
     }
 
-    // A title the block holds itself occupies the block's first line.
+    // A title marked in its own right knows which line it came from.
+    if let Some(title) = block_title_in(block).filter(|title| title.has_attribute(TITLE)) {
+        return attr(&title, LINE);
+    }
+
+    // One the block holds instead of marking — an admonition's — has no line
+    // of its own: it is the block's first.
     if block_title_in(block).is_some() {
         return attr(block, LINE);
     }
