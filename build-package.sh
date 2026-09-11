@@ -37,10 +37,15 @@ fi
 
 if [ -n "$optimiser" ]; then
   # --converge repeats until nothing more comes off; the strips drop sections
-  # a browser never reads.
-  "$optimiser" -Oz --converge --strip-debug --strip-producers \
-    --strip-target-features \
-    pkg/asciidoc_editor_bg.wasm -o pkg/asciidoc_editor_bg.wasm
+  # a browser never reads. Older binaryens do not know every one of these, and
+  # a release is not worth failing over a flag, so fall back to the basics.
+  if ! "$optimiser" -Oz --converge --strip-debug --strip-producers \
+      --strip-target-features \
+      pkg/asciidoc_editor_bg.wasm -o pkg/asciidoc_editor_bg.wasm 2>/dev/null; then
+    echo "wasm-opt rejected the full flag set; optimising with -Oz alone" >&2
+    "$optimiser" -Oz --strip-debug \
+      pkg/asciidoc_editor_bg.wasm -o pkg/asciidoc_editor_bg.wasm
+  fi
 else
   echo "wasm-opt not found: shipping the unoptimised wasm" >&2
 fi
