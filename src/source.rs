@@ -67,6 +67,26 @@ pub fn image_macro(target: &str, alt: &str) -> String {
     )
 }
 
+/// Schemes AsciiDoc turns into links on sight; anything else needs the macro
+/// spelled out.
+const LINKED_SCHEMES: [&str; 6] = [
+    "http://", "https://", "ftp://", "mailto:", "irc:", "file://",
+];
+
+/// Writes a link to `url`, shown as `label`.
+pub fn link_macro(url: &str, label: &str) -> String {
+    let url = url.trim();
+    let label = label.replace(']', "\\]");
+    let label = label.trim();
+
+    let bare = LINKED_SCHEMES.iter().any(|scheme| url.starts_with(scheme));
+
+    match bare {
+        true => format!("{url}[{label}]"),
+        false => format!("link:{url}[{label}]"),
+    }
+}
+
 /// The target and description of an image macro.
 ///
 /// Returns `None` for a macro carrying anything else — a width, a role, a
@@ -549,6 +569,25 @@ mod tests {
         assert_eq!(
             insert_block(closed, 6, "image::x.png[]"),
             "= T\n\n|===\n| a\n|===\n\nimage::x.png[]\n\nAfter\n"
+        );
+    }
+
+    #[test]
+    fn writes_link_macros() {
+        assert_eq!(
+            link_macro("https://example.com", "Example"),
+            "https://example.com[Example]"
+        );
+        assert_eq!(link_macro("mailto:a@b.c", "Mail"), "mailto:a@b.c[Mail]");
+        // Without a scheme AsciiDoc would read it as text, not a target.
+        assert_eq!(
+            link_macro("guide.html", "The guide"),
+            "link:guide.html[The guide]"
+        );
+        assert_eq!(link_macro(" https://x.dev ", ""), "https://x.dev[]");
+        assert_eq!(
+            link_macro("https://x.dev", "a ] b"),
+            "https://x.dev[a \\] b]"
         );
     }
 

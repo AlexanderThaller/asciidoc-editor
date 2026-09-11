@@ -117,6 +117,11 @@ pub fn App() -> impl IntoView {
     let insert_after = RwSignal::new(None::<wysiwyg::Block>);
     // Set when the panel is changing an image rather than adding one.
     let editing_image = RwSignal::new(None::<wysiwyg::Block>);
+    // The link panel, and the span in the document it would write over.
+    let link_panel = RwSignal::new(false);
+    let link_url = RwSignal::new(String::new());
+    let link_text = RwSignal::new(String::new());
+    let link_span = RwSignal::new(None::<(usize, usize, usize)>);
 
     // The block being edited in place, if any. While it is set the preview is
     // left alone: re-rendering under a live caret would destroy it.
@@ -257,6 +262,38 @@ pub fn App() -> impl IntoView {
         if let Some(document) = preview_document(frame) {
             wysiwyg::set_admonition(&document, source, label, &rerender);
         }
+    };
+
+    // The selection is taken now: filling in the panel moves focus out of the
+    // document, and with it any idea of what was selected.
+    let open_link_panel = move || {
+        let Some(document) = preview_document(frame) else {
+            return;
+        };
+        let Some((line, start, end, selected)) = wysiwyg::selection_span(&document) else {
+            return;
+        };
+
+        link_span.set(Some((line, start, end)));
+        link_text.set(selected);
+        link_url.set(String::new());
+        image_panel.set(false);
+        notice.set(None);
+        link_panel.set(true);
+    };
+
+    let add_link = move || {
+        let (Some(document), Some((line, start, end))) =
+            (preview_document(frame), link_span.get_untracked())
+        else {
+            return;
+        };
+
+        let link = source::link_macro(&link_url.get_untracked(), &link_text.get_untracked());
+        wysiwyg::insert_link(&document, source, line, (start, end), &link, &rerender);
+
+        link_panel.set(false);
+        link_span.set(None);
     };
 
     let apply_title = move |add: bool| {
@@ -449,6 +486,18 @@ pub fn App() -> impl IntoView {
                     </button>
                     <button
                         class="button icon"
+                        title="Insert a link"
+                        disabled=move || {
+                            !editing.get().is_some_and(|block| wysiwyg::takes_links(block.kind))
+                        }
+                        class:active=move || link_panel.get()
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| open_link_panel()
+                    >
+                        "🔗"
+                    </button>
+                    <button
+                        class="button icon"
                         title="Monospace (ctrl+E)"
                         on:mousedown=|ev| ev.prevent_default()
                         on:click=move |_| apply_format("code")
@@ -619,6 +668,7 @@ pub fn App() -> impl IntoView {
                 on:click=move |_| {
                     notice.set(None);
                     let opening = !image_panel.get_untracked();
+                    link_panel.set(false);
                     editing_image.set(None);
                     image_url.set(String::new());
                     image_alt.set(String::new());
@@ -835,6 +885,49 @@ pub fn App() -> impl IntoView {
             </header>
         </Show>
 
+
+        <Show when=move || link_panel.get()>
+            <div class="panel">
+                <span class="chip">
+                    {move || match link_span.get() {
+                        Some((_, start, end)) if start != end => "Over the selection".to_string(),
+                        _ => "At the caret".to_string(),
+                    }}
+                </span>
+
+                <label>
+                    "Link to"
+                    <input
+                        type="text"
+                        placeholder="https://example.com or guide.html"
+                        prop:value=link_url
+                        on:input=move |ev| link_url.set(event_target_value(&ev))
+                    />
+                </label>
+                <label>
+                    "Text"
+                    <input
+                        type="text"
+                        placeholder="What the link says"
+                        prop:value=link_text
+                        on:input=move |ev| link_text.set(event_target_value(&ev))
+                    />
+                </label>
+
+                <button
+                    class="button"
+                    disabled=move || link_url.get().trim().is_empty()
+                    on:click=move |_| add_link()
+                >
+                    "Insert link"
+                </button>
+
+                <div class="spacer"></div>
+                <button class="button" on:click=move |_| link_panel.set(false)>
+                    "Close"
+                </button>
+            </div>
+        </Show>
 
         <Show when=move || image_panel.get()>
             <div class="panel">

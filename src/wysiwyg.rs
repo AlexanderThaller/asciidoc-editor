@@ -748,25 +748,31 @@ fn is_list(element: &Element) -> bool {
 /// occupies, so their recorded numbers are shifted to keep them addressable
 /// without a re-render.
 pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) {
+    write_block(block, content, source, &serialize(block));
+}
+
+/// Writes `written` back as the block's source, in whatever shape its kind
+/// takes: a title's leading dot, a heading's `=`, an admonition's label.
+fn write_block(block: &Element, content: &Element, source: RwSignal<String>, written: &str) {
     let Some(start) = attr(block, LINE) else {
         return;
     };
     let text = match kind_of(block) {
         Kind::Title => {
-            let written = serialize(block);
+            let written = written.to_string();
             // Drop the generated prefix again. If the caret wandered into it
             // there is nothing to strip, and what the user typed is used whole.
             let prefix = block.get_attribute(PREFIX).unwrap_or_default();
             source::as_title(written.strip_prefix(&prefix).unwrap_or(&written))
         }
-        Kind::Heading(level) => source::as_block(&serialize(block), Some(level)),
+        Kind::Heading(level) => source::as_block(written, Some(level)),
         // The label is part of the source line but not of what is rendered,
         // and a title of its own occupies the line above.
         Kind::Admonition(_) => {
             let text = format!(
                 "{}{}",
                 block.get_attribute(LEAD).unwrap_or_default(),
-                serialize(block)
+                written
             );
 
             match block_title_in(block) {
@@ -777,7 +783,7 @@ pub fn sync_block(block: &Element, content: &Element, source: RwSignal<String>) 
                 None => text,
             }
         }
-        _ => serialize(block),
+        _ => written.to_string(),
     };
 
     let added = text.split('\n').count();
@@ -1464,6 +1470,79 @@ fn start_pending_block(document: &Document, content: &Element, after: &Element, 
     focus(document, &paragraph);
 }
 
+/// Whether a link can be written into this kind of block.
+///
+/// A list or a table writes back as a whole — markers, rows and all — so an
+/// offset measured against its text would not line up with it.
+pub fn takes_links(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Body | Kind::Heading(_) | Kind::Title | Kind::Admonition(_)
+    )
+}
+
+/// Where the selection begins and ends within the focused block's own text,
+/// and what it covers.
+pub fn selection_span(document: &Document) -> Option<(usize, usize, usize, String)> {
+    let block = focused(document)?;
+    if !takes_links(kind_of(&block)) {
+        return None;
+    }
+
+    let line = attr(&block, LINE)?;
+    let selection = document.get_selection().ok()??;
+    let range = selection.get_range_at(0).ok()?;
+
+    let start = offset_within(
+        document,
+        &block,
+        &range.start_container().ok()?,
+        range.start_offset().ok()?,
+    )?;
+    let end = offset_within(
+        document,
+        &block,
+        &range.end_container().ok()?,
+        range.end_offset().ok()?,
+    )?;
+
+    Some((
+        line,
+        start,
+        end,
+        selection.to_string().as_string().unwrap_or_default(),
+    ))
+}
+
+/// Writes `link` over the span the selection covered.
+pub fn insert_link<R>(
+    document: &Document,
+    source: RwSignal<String>,
+    line: usize,
+    span: (usize, usize),
+    link: &str,
+    rerender: &R,
+) -> Option<()>
+where
+    R: Fn(Option<usize>),
+{
+    let content = content_of(document)?;
+    let block = content
+        .query_selector(&format!("[{LINE}=\"{line}\"]"))
+        .ok()??;
+
+    let text = serialize(&block);
+    let (start, end) = (span.0.min(text.len()), span.1.min(text.len()));
+    if start > end || !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+        return None;
+    }
+
+    let written = format!("{}{link}{}", &text[..start], &text[end..]);
+    write_block(&block, &content, source, &written);
+    rerender(Some(line));
+    Some(())
+}
+
 /// How far into the block's AsciiDoc text the caret sits.
 ///
 /// Serialising the content *before* the caret gives the answer directly: the
@@ -1473,9 +1552,16 @@ fn caret_offset(document: &Document, block: &Element) -> Option<usize> {
     let selection = document.get_selection().ok()??;
     let focus_node = selection.focus_node()?;
 
+    offset_within(document, block, &focus_node, selection.focus_offset())
+}
+
+/// Serialising the content *before* a point gives its offset directly: the
+/// same function that writes the block out defines the mapping, so the two
+/// can never disagree.
+fn offset_within(document: &Document, block: &Element, node: &Node, offset: u32) -> Option<usize> {
     let range = document.create_range().ok()?;
     range.set_start(block, 0).ok()?;
-    range.set_end(&focus_node, selection.focus_offset()).ok()?;
+    range.set_end(node, offset).ok()?;
 
     let fragment = range.clone_contents().ok()?;
     Some(
