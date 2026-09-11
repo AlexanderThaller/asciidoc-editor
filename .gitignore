@@ -1,3 +1,5 @@
 /target
 /dist
 /pkg
+
+rustc-ice-*.txt
