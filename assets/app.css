@@ -11,7 +11,37 @@
   --editor-pad: 1rem;
 }
 
-.asciidoc-editor, .asciidoc-editor * { box-sizing: border-box; }
+/*
+ * The page around the editor styles its own elements, and those rules reach in
+ * here too — a host `main { max-width: 60rem; margin: 0 auto }` was enough to
+ * squeeze the document into a 300px column, because the auto margins stopped
+ * the pane stretching. Everything that decides layout is put back to its
+ * initial value here; the editor's own rules follow, and being more specific
+ * they have the last word.
+ */
+.asciidoc-editor, .asciidoc-editor * {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  max-width: none;
+  min-height: 0;
+  max-height: none;
+  float: none;
+  clear: none;
+  text-align: start;
+  text-indent: 0;
+  text-transform: none;
+  letter-spacing: normal;
+  list-style: none;
+  background-image: none;
+  box-shadow: none;
+  text-shadow: none;
+  vertical-align: baseline;
+}
 
 /*
  * The editor fills whatever it is put in. Flex rather than fixed rows: the

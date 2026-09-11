@@ -33,6 +33,10 @@
         margin: 1rem 0;
       }
 
+      /*
+        Styled by element, the way a page styles itself — and every one of
+        these reaches into the editor too. It has to survive them.
+      */
       button {
         padding: 0.4rem 0.8rem;
         border: 1px solid #d3d8e0;
@@ -40,6 +44,22 @@
         background: #fff;
         font: inherit;
         cursor: pointer;
+        text-transform: uppercase;
+      }
+
+      section,
+      header,
+      footer {
+        max-width: 30rem;
+        margin: 0 auto;
+        padding: 1rem;
+        border: 2px solid #c3cad4;
+      }
+
+      input {
+        width: 100%;
+        padding: 0.5rem;
+        border: 2px solid #c3cad4;
       }
 
       #saved {
@@ -83,6 +103,11 @@
       </div>
 
       <pre id="out">The document appears here.</pre>
+
+      <section>
+        A section of the page's own, narrow and bordered because the rule above
+        says so.
+      </section>
 
       <!--
         The editor's styling is scoped to its own container. These carry the

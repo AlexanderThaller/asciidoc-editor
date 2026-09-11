@@ -501,7 +501,7 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
     });
 
     view! {
-        <header class="toolbar">
+        <div class="toolbar" role="toolbar" aria-label="Formatting">
             <span class="brand">"AsciiDoc"</span>
 
             <div class="modes">
@@ -814,10 +814,10 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
             >
                 "Export .html"
             </button>
-        </header>
+        </div>
 
         <Show when=move || mode.get() == Mode::Rich>
-            <header class="toolbar context">
+            <div class="toolbar context" role="toolbar" aria-label="This block">
                 {move || match editing.get() {
                     None => {
                         view! {
@@ -1012,7 +1012,7 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
                             .into_any()
                     }
                 }}
-            </header>
+            </div>
         </Show>
 
 
@@ -1127,8 +1127,8 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
             </div>
         </Show>
 
-        <main class="panes" class:rich=move || mode.get() == Mode::Rich>
-            <section class="editor">
+        <div class="panes" class:rich=move || mode.get() == Mode::Rich>
+            <div class="editor">
                 <pre class="overlay" node_ref=overlay inner_html=move || highlight::highlight(&source.get())></pre>
                 <textarea
                     class="source"
@@ -1146,11 +1146,11 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
                     on:keyup=move |_| sync_cursor(textarea, frame, source, last_line, Force::No)
                     on:click=move |_| sync_cursor(textarea, frame, source, last_line, Force::No)
                 />
-            </section>
+            </div>
 
             <div class="divider"></div>
 
-            <section class="preview">
+            <div class="preview">
                 <iframe
                     node_ref=frame
                     srcdoc=preview_shell()
@@ -1174,10 +1174,10 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
                         preview_ready.set(true);
                     }
                 />
-            </section>
-        </main>
+            </div>
+        </div>
 
-        <footer class="status">
+        <div class="status" role="status">
             {move || {
                 if let Some(said) = notice.get() {
                     return view! { <span class="warn">{said}</span> }.into_any();
@@ -1197,7 +1197,7 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
                         .into_any()
                 }
             }}
-        </footer>
+        </div>
     }
 }
 
