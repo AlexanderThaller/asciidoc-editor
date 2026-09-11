@@ -539,6 +539,7 @@ pub fn App() -> impl IntoView {
                                             | wysiwyg::Kind::Admonition(_)
                                             | wysiwyg::Kind::Table { .. }
                                             | wysiwyg::Kind::Image
+                                            | wysiwyg::Kind::Attribution(_)
                                     )
                                 })
                         }
@@ -584,6 +585,7 @@ pub fn App() -> impl IntoView {
                                             | wysiwyg::Kind::Admonition(_)
                                             | wysiwyg::Kind::Table { .. }
                                             | wysiwyg::Kind::Image
+                                            | wysiwyg::Kind::Attribution(_)
                                     )
                                 })
                         }
@@ -612,6 +614,7 @@ pub fn App() -> impl IntoView {
                                         | wysiwyg::Kind::Admonition(_)
                                         | wysiwyg::Kind::Table { .. }
                                         | wysiwyg::Kind::Image
+                                            | wysiwyg::Kind::Attribution(_)
                                 )
                             })
                         }
@@ -639,6 +642,7 @@ pub fn App() -> impl IntoView {
                                                     | wysiwyg::Kind::Admonition(_)
                                                     | wysiwyg::Kind::Table { .. }
                                                     | wysiwyg::Kind::Image
+                                            | wysiwyg::Kind::Attribution(_)
                                             )
                                         })
                                     }
@@ -1099,6 +1103,7 @@ fn describe(kind: wysiwyg::Kind) -> String {
         wysiwyg::Kind::Admonition(label) => label.to_string(),
         wysiwyg::Kind::Table { .. } => "Table cell".to_string(),
         wysiwyg::Kind::Image => "Image".to_string(),
+        wysiwyg::Kind::Attribution(style) => format!("{style} attribution"),
     }
 }
 

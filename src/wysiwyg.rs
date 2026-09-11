@@ -57,6 +57,9 @@ pub enum Kind {
     /// An inline admonition, such as `NOTE: mind the gap`, labelled with one
     /// of [`source::ADMONITIONS`].
     Admonition(&'static str),
+    /// The attribution under a quote or a verse, which lives in the block's
+    /// attribute line rather than in its body.
+    Attribution(&'static str),
     /// An image block. It has no text to edit, so it is focused rather than
     /// typed into, and changed through the panel that made it.
     Image,
@@ -78,6 +81,8 @@ const LEVEL: &str = "data-edit-level";
 const MARKER: &str = "data-edit-marker";
 /// Marks a block title, whose source line carries a leading dot.
 const TITLE: &str = "data-edit-title";
+/// Marks an attribution, holding the style whose line it belongs to.
+const ATTRIBUTION: &str = "data-edit-attribution";
 /// Text the renderer generates in front of a title, such as a table's number.
 const PREFIX: &str = "data-edit-prefix";
 /// Text the source carries in front of the content but the rendering drops,
@@ -173,6 +178,41 @@ pub fn mark_editable(content: &Element, src: &str) {
         }
 
         offer(&items, range, Kind::Body, &source::text_of(src, range));
+    }
+
+    for block in select(
+        content,
+        "div.quoteblock[data-source-line], div.verseblock[data-source-line]",
+    ) {
+        let (Some(line), Ok(Some(attribution))) = (
+            line_of(&block),
+            block.query_selector(":scope > .attribution"),
+        ) else {
+            continue;
+        };
+
+        let range = LineRange::single(line);
+        let Some((style, author)) = source::attribution(&source::text_of(src, range)) else {
+            let _ = attribution.set_attribute("title", REFUSED);
+            continue;
+        };
+
+        // The dash in front is the renderer's, not the document's.
+        let prefix = serialize(&attribution)
+            .strip_suffix(author.trim_end())
+            .unwrap_or_default()
+            .to_string();
+        if !prefix.is_empty() {
+            let _ = attribution.set_attribute(PREFIX, &prefix);
+        }
+
+        let _ = attribution.set_attribute(ATTRIBUTION, style);
+        offer(
+            &attribution,
+            range,
+            Kind::Attribution(style),
+            &format!("{prefix}{author}"),
+        );
     }
 
     for image in select(content, "div.imageblock[data-source-line]") {
@@ -456,6 +496,15 @@ fn block_title_in(block: &Element) -> Option<Element> {
 fn kind_of(block: &Element) -> Kind {
     if block.has_attribute(TITLE) {
         return Kind::Title;
+    }
+
+    if let Some(style) = block.get_attribute(ATTRIBUTION).and_then(|style| {
+        source::ATTRIBUTED
+            .iter()
+            .copied()
+            .find(|known| *known == style)
+    }) {
+        return Kind::Attribution(style);
     }
 
     if block.has_attribute(IMAGE) {
@@ -780,6 +829,10 @@ fn write_block(block: &Element, content: &Element, source: RwSignal<String>, wri
             source::as_title(written.strip_prefix(&prefix).unwrap_or(&written))
         }
         Kind::Heading(level) => source::as_block(written, Some(level)),
+        Kind::Attribution(style) => {
+            let prefix = block.get_attribute(PREFIX).unwrap_or_default();
+            source::with_attribution(style, written.strip_prefix(&prefix).unwrap_or(written))
+        }
         // The label is part of the source line but not of what is rendered,
         // and a title of its own occupies the line above.
         Kind::Admonition(_) => {

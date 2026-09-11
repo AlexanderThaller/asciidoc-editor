@@ -40,13 +40,61 @@ pub fn paragraph_range(src: &str, start: usize) -> LineRange {
 
     let mut end = start;
     for (index, line) in src.lines().enumerate().skip(start) {
-        if line.trim().is_empty() {
+        if line.trim().is_empty() || is_delimiter(line) {
             break;
         }
         end = index + 1;
     }
 
     LineRange { start, end }
+}
+
+/// Block styles that carry an attribution.
+pub const ATTRIBUTED: [&str; 2] = ["quote", "verse"];
+
+/// The style and author of a `[quote,Someone]` line.
+///
+/// Returns `None` for anything carrying more — a citation, a named attribute
+/// — since rewriting from a style and an author alone would drop it.
+pub fn attribution(line: &str) -> Option<(&'static str, String)> {
+    let inside = line.trim().strip_prefix('[')?.strip_suffix(']')?;
+    let (style, author) = inside.split_once(',')?;
+
+    if author.contains(',') || author.contains('=') {
+        return None;
+    }
+
+    let style = ATTRIBUTED
+        .iter()
+        .copied()
+        .find(|known| *known == style.trim())?;
+
+    Some((style, author.trim().to_string()))
+}
+
+/// Writes an attribution line back.
+pub fn with_attribution(style: &str, author: &str) -> String {
+    format!("[{style},{}]", author.replace(']', "\\]").trim())
+}
+
+/// Whether the line opens or closes a delimited block.
+///
+/// A paragraph stops at one of these as surely as at a blank line: what
+/// follows belongs to another block.
+pub fn is_delimiter(line: &str) -> bool {
+    let line = line.trim_end();
+
+    if line == "|===" || line == "!===" || line == "--" {
+        return true;
+    }
+
+    let Some(first) = line.chars().next() else {
+        return false;
+    };
+
+    matches!(first, '-' | '=' | '_' | '*' | '.' | '+' | '/')
+        && line.len() >= 4
+        && line.chars().all(|character| character == first)
 }
 
 /// Whether the line belongs to the block below it rather than being content:
@@ -505,6 +553,46 @@ mod tests {
     fn paragraph_extends_to_the_next_blank_line() {
         assert_eq!(paragraph_range(DOC, 3), LineRange { start: 3, end: 4 });
         assert_eq!(paragraph_range(DOC, 8), LineRange { start: 8, end: 8 });
+    }
+
+    #[test]
+    fn reads_and_writes_attributions() {
+        assert_eq!(
+            attribution("[quote,Eric Scouten]"),
+            Some(("quote", "Eric Scouten".to_string()))
+        );
+        assert_eq!(
+            attribution("[verse,Anon]"),
+            Some(("verse", "Anon".to_string()))
+        );
+        assert_eq!(
+            attribution("[quote,Someone,A source]"),
+            None,
+            "a citation as well"
+        );
+        assert_eq!(attribution("[quote]"), None, "nobody to attribute to");
+        assert_eq!(attribution("[source,rust]"), None);
+        assert_eq!(with_attribution("quote", "Someone"), "[quote,Someone]");
+    }
+
+    #[test]
+    fn recognises_block_delimiters() {
+        assert!(is_delimiter("----"));
+        assert!(is_delimiter("____"));
+        assert!(is_delimiter("===="));
+        assert!(is_delimiter("|==="));
+        assert!(is_delimiter("--"));
+        assert!(!is_delimiter("== A heading"));
+        assert!(!is_delimiter("* an item"));
+        assert!(!is_delimiter("..."), "too short to delimit");
+        assert!(!is_delimiter("Body text"));
+    }
+
+    #[test]
+    fn a_paragraph_stops_at_the_delimiter_that_closes_its_block() {
+        let quoted = "= T\n\n[quote,Someone]\n____\nThe quoted words.\n____\n";
+
+        assert_eq!(paragraph_range(quoted, 5), LineRange { start: 5, end: 5 });
     }
 
     #[test]
