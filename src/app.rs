@@ -427,6 +427,12 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    let apply_task = move |done: Option<bool>| {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::set_task(&document, source, done, &rerender);
+        }
+    };
+
     let apply_indent = move |outdent: bool| {
         if let Some(document) = preview_document(frame) {
             wysiwyg::reindent_focused(&document, source, outdent);
@@ -943,6 +949,32 @@ pub fn App() -> impl IntoView {
                             </Show>
 
                             <Show when=move || is_list>
+                                <span class="separator"></span>
+                                <button
+                                    class="button"
+                                    title="Make this item a task, or an ordinary one again"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_task(None)
+                                >
+                                    "Task"
+                                </button>
+                                <button
+                                    class="button"
+                                    title="Mark this task done"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_task(Some(true))
+                                >
+                                    "✓"
+                                </button>
+                                <button
+                                    class="button"
+                                    title="Mark this task not done"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| apply_task(Some(false))
+                                >
+                                    "☐"
+                                </button>
+
                                 <span class="separator"></span>
                                 <button
                                     class="button icon"

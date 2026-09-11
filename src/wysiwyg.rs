@@ -608,6 +608,83 @@ fn table_of_cell(cell: &Element) -> Option<Element> {
     cell.closest("table").ok()?
 }
 
+/// Turns the item at the caret into a task, or changes whether it is done.
+///
+/// The state is read from the document rather than remembered, since the
+/// caret moves between items without the block it sits in changing.
+pub fn set_task<R>(document: &Document, source: RwSignal<String>, done: Option<bool>, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let (Some(block), Some(content)) = (focused(document), content_of(document)) else {
+        return;
+    };
+    if !is_list(&block) {
+        return;
+    }
+
+    let Some(index) = caret_item(document)
+        .and_then(|item| select(&block, "li").iter().position(|other| *other == item))
+    else {
+        return;
+    };
+
+    let Some(mut items) = list::from_element(&block) else {
+        return;
+    };
+    let Some(current) = list::task_at(&items, index) else {
+        return;
+    };
+
+    // `done` says what to set; without one the item stops being a task, or
+    // becomes an unfinished one.
+    let wanted = match (done, current) {
+        (Some(state), _) => Some(state),
+        (None, Some(_)) => None,
+        (None, None) => Some(false),
+    };
+
+    list::set_task(&mut items, index, wanted);
+
+    let marker = block
+        .get_attribute(SHAPE)
+        .is_none()
+        .then(|| block.get_attribute(MARKER))
+        .flatten()
+        .and_then(|marker| marker.chars().next())
+        .unwrap_or('*');
+
+    let line = attr(&block, LINE);
+    write_block(&block, &content, source, &list::to_asciidoc(&items, marker));
+    rerender(line);
+
+    // Back into the item that changed, so a second action lands on the same
+    // one: a re-render leaves the caret on the list itself, where no item is.
+    if let Some(fresh) = line.and_then(|line| {
+        content_of(document)?
+            .query_selector(&format!("[{LINE}=\"{line}\"]"))
+            .ok()?
+    }) && let Some(item) = select(&fresh, "li").get(index)
+    {
+        place_caret(document, item);
+    }
+}
+
+/// Puts the caret inside `element`, focusing whatever editing host holds it.
+fn place_caret(document: &Document, element: &Element) -> Option<()> {
+    let host = element.closest("[contenteditable=\"true\"]").ok()??;
+    let html: &web_sys::HtmlElement = host.unchecked_ref();
+    let _ = html.focus();
+
+    let selection = document.get_selection().ok()??;
+    let range = document.create_range().ok()?;
+    range.select_node_contents(element).ok()?;
+    range.collapse_with_to_start(true);
+    selection.remove_all_ranges().ok()?;
+    selection.add_range(&range).ok()?;
+    Some(())
+}
+
 /// Adds a row under the focused cell's row, or takes that row away.
 ///
 /// Either way the row count changes, so the recorded layout no longer fits and

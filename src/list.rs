@@ -24,7 +24,13 @@ pub struct List {
 pub struct Item {
     pub content: Vec<Inline>,
     pub nested: Option<List>,
+    /// Whether the item is a task, and whether it is done.
+    pub task: Option<bool>,
 }
+
+/// What the renderer puts in front of a task in place of a checkbox.
+const DONE: char = '\u{2713}';
+const TO_DO: char = '\u{274f}';
 
 /// Writes a list back out, one line per item.
 ///
@@ -52,12 +58,66 @@ fn write(list: &List, marker: char, depth: usize, lines: &mut Vec<String>) {
             continue;
         }
 
-        lines.push(format!("{} {}", marker.to_string().repeat(depth), text));
+        let box_ = match item.task {
+            Some(true) => "[x] ",
+            Some(false) => "[ ] ",
+            None => "",
+        };
+
+        lines.push(format!("{} {box_}{text}", marker.to_string().repeat(depth)));
 
         if let Some(nested) = &item.nested {
             write(nested, marker, depth + 1, lines);
         }
     }
+}
+
+/// Changes whether the item at `index`, counted in the order the items are
+/// written, is a task and whether it is done.
+pub fn set_task(list: &mut List, index: usize, task: Option<bool>) -> bool {
+    let mut seen = 0;
+    assign(list, &mut seen, index, task)
+}
+
+fn assign(list: &mut List, seen: &mut usize, index: usize, task: Option<bool>) -> bool {
+    for item in &mut list.items {
+        if *seen == index {
+            item.task = task;
+            return true;
+        }
+        *seen += 1;
+
+        if let Some(nested) = &mut item.nested
+            && assign(nested, seen, index, task)
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Whether the item at `index` is a task, and whether it is done.
+pub fn task_at(list: &List, index: usize) -> Option<Option<bool>> {
+    let mut seen = 0;
+    find(list, &mut seen, index)
+}
+
+fn find(list: &List, seen: &mut usize, index: usize) -> Option<Option<bool>> {
+    for item in &list.items {
+        if *seen == index {
+            return Some(item.task);
+        }
+        *seen += 1;
+
+        if let Some(nested) = &item.nested
+            && let Some(found) = find(nested, seen, index)
+        {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 /// Reads a rendered `ul` or `ol`.
@@ -103,10 +163,36 @@ fn item_from_li(li: &Node) -> Item {
         }
     }
 
+    let mut content = inline::from_nodes(&content);
+    let task = take_task_marker(&mut content);
+
     Item {
-        content: inline::from_nodes(&content),
+        content,
         nested,
+        task,
     }
+}
+
+/// Reads and removes the mark the renderer puts in front of a task, leaving
+/// the item's own words behind.
+fn take_task_marker(content: &mut [Inline]) -> Option<bool> {
+    // The renderer's indentation arrives as text of its own, so the mark is
+    // not necessarily in the first node.
+    let text = content.iter_mut().find_map(|node| match node {
+        Inline::Text(text) if !text.trim().is_empty() => Some(text),
+        _ => None,
+    })?;
+
+    let trimmed = text.trim_start();
+    let done = match trimmed.chars().next()? {
+        DONE => true,
+        TO_DO => false,
+        _ => return None,
+    };
+
+    let mark = if done { DONE } else { TO_DO };
+    *text = trimmed[mark.len_utf8()..].to_string();
+    Some(done)
 }
 
 /// Reads a node as a nested list, seeing through the wrapper the renderer puts
@@ -146,6 +232,14 @@ mod tests {
         Item {
             content: vec![Inline::Text(text.to_string())],
             nested: None,
+            task: None,
+        }
+    }
+
+    fn task(text: &str, done: bool) -> Item {
+        Item {
+            task: Some(done),
+            ..item(text)
         }
     }
 
@@ -186,6 +280,7 @@ mod tests {
                 Item {
                     content: vec![Inline::Text("outer".to_string())],
                     nested: Some(list(vec![item("inner")])),
+                    task: None,
                 },
                 item("after"),
             ],
@@ -202,6 +297,7 @@ mod tests {
                 Inline::Code(vec![Inline::Text("code".to_string())]),
             ],
             nested: None,
+            task: None,
         }]);
 
         assert_eq!(to_asciidoc(&formatted, '*'), "* a `code`");
@@ -213,12 +309,44 @@ mod tests {
         let padded = list(vec![Item {
             content: vec![Inline::Text("\n  text  \n".to_string())],
             nested: None,
+            task: None,
         }]);
 
         assert_eq!(to_asciidoc(&padded, '*'), "* text");
     }
 
     /// Pressing Enter creates an item before there is anything to put in it.
+    #[test]
+    fn writes_tasks_with_their_boxes() {
+        let tasks = list(vec![task("done one", true), task("still to do", false)]);
+
+        assert_eq!(
+            to_asciidoc(&tasks, '*'),
+            "* [x] done one\n* [ ] still to do"
+        );
+    }
+
+    #[test]
+    fn finds_and_changes_the_task_at_a_position() {
+        let mut nested = List {
+            ordered: false,
+            items: vec![
+                Item {
+                    content: vec![Inline::Text("outer".to_string())],
+                    nested: Some(list(vec![item("inner")])),
+                    task: None,
+                },
+                item("after"),
+            ],
+        };
+
+        assert_eq!(task_at(&nested, 1), Some(None), "the nested item");
+        assert!(set_task(&mut nested, 1, Some(false)));
+        assert_eq!(task_at(&nested, 1), Some(Some(false)));
+        assert_eq!(to_asciidoc(&nested, '*'), "* outer\n** [ ] inner\n* after");
+        assert_eq!(task_at(&nested, 9), None, "past the end");
+    }
+
     #[test]
     fn skips_items_with_nothing_in_them() {
         let with_empty = list(vec![item("one"), item("  "), item("two")]);
