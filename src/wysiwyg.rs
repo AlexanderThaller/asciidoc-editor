@@ -24,7 +24,7 @@
 
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, convert::FromWasmAbi, prelude::Closure};
-use web_sys::{Document, Element, Event, HtmlDocument, KeyboardEvent, Node};
+use web_sys::{Document, Element, Event, HtmlDocument, KeyboardEvent, Node, Range};
 
 use crate::{
     inline, list,
@@ -36,6 +36,8 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Block {
     pub line: usize,
+    /// Last line of the block's source.
+    pub end: usize,
     pub kind: Kind,
     /// The line of the title attached to this block, when it has one. Also set
     /// on a title itself, which is its own.
@@ -80,6 +82,8 @@ const PREFIX: &str = "data-edit-prefix";
 const LEAD: &str = "data-edit-lead";
 /// How a table's rows were laid out in the source.
 const SHAPE: &str = "data-edit-shape";
+/// Marks the block that a new one would be added below.
+const INSERT: &str = "data-edit-insert-after";
 /// Marks a table whose `cols` attribute cannot be kept in step, and whose
 /// columns therefore cannot be changed here.
 const FIXED: &str = "data-edit-fixed-columns";
@@ -569,23 +573,40 @@ where
     rerender(Some(first));
 }
 
-/// Adds a block of its own below the block the caret is in, or at the end of
-/// the document when nothing is focused.
+/// Adds a block of its own below the block ending at `after`, or at the end of
+/// the document when there is none.
+///
+/// The caller says where rather than the focus, which by the time a panel has
+/// been filled in has moved out of the document entirely.
 pub fn insert_block_below<R>(
-    document: &Document,
     source: RwSignal<String>,
+    after: Option<usize>,
     text: &str,
     rerender: &R,
 ) where
     R: Fn(Option<usize>),
 {
-    let below = focused(document)
-        .and_then(|block| attr(&block, END).or_else(|| attr(&block, LINE)))
-        // Past the block and the blank line that closes it.
-        .map_or(usize::MAX, |end| end + 2);
+    // Past the block and the blank line that closes it.
+    let below = after.map_or(usize::MAX, |end| end + 2);
 
     source.set(source::insert_block(&source.get_untracked(), below, text));
     rerender(None);
+}
+
+/// Marks the block a new one would go below, and clears any earlier mark.
+pub fn mark_insertion_point(document: &Document, line: Option<usize>) -> Option<()> {
+    let content = content_of(document)?;
+
+    for marked in select(&content, &format!("[{INSERT}]")) {
+        let _ = marked.remove_attribute(INSERT);
+    }
+
+    let target = line?;
+    let block = content
+        .query_selector(&format!("[{LINE}=\"{target}\"]"))
+        .ok()??;
+
+    block.set_attribute(INSERT, "true").ok()
 }
 
 /// Removes the focused cell's table outright.
@@ -740,6 +761,7 @@ pub fn attach<R, T>(
         editing.set(editable_target(&ev).and_then(|block| {
             Some(Block {
                 line: attr(&block, LINE)?,
+                end: attr(&block, END).or_else(|| attr(&block, LINE))?,
                 kind: kind_of(&block),
                 title_line: title_line_of(&block),
             })
@@ -790,6 +812,28 @@ pub fn attach<R, T>(
                 ev.prevent_default();
                 split_block(&document, &content, &block, source, &rerender);
                 return;
+            }
+
+            // A block is its own editing host, so the arrow keys stop at its
+            // edges. Carry them across to the next block, which is the only
+            // way out of a list without reaching for the mouse.
+            if matches!(ev.key().as_str(), "ArrowDown" | "ArrowUp")
+                && !ev.shift_key()
+                && !ev.ctrl_key()
+                && !ev.meta_key()
+            {
+                let down = ev.key() == "ArrowDown";
+                if at_edge(&document, &block, down)
+                    && let Some(next) = neighbour(&content, &block, down)
+                {
+                    ev.prevent_default();
+                    if down {
+                        focus(&document, &next);
+                    } else {
+                        focus_end(&document, &next);
+                    }
+                    return;
+                }
             }
 
             if ev.key() == "Tab" && is_list(&block) {
@@ -1346,6 +1390,84 @@ fn caret_offset(document: &Document, block: &Element) -> Option<usize> {
     )
 }
 
+/// Whether the caret sits on the block's first or last line.
+fn at_edge(document: &Document, block: &Element, down: bool) -> bool {
+    let Some(caret) = document
+        .get_selection()
+        .ok()
+        .flatten()
+        .and_then(|selection| selection.get_range_at(0).ok())
+    else {
+        return false;
+    };
+
+    let rect = caret.get_bounding_client_rect();
+    if rect.height() == 0.0 {
+        // A caret placed from script has no rectangle until the browser has
+        // normalised it, which is precisely the case after arriving here from
+        // the block above or below.
+        return at_content_edge(document, block, &caret, down);
+    }
+
+    // Half a line of slack: a block's own padding leaves the caret a little
+    // short of its edge, while the line above is a whole line away.
+    let slack = rect.height() / 2.0;
+    let bounds = block.get_bounding_client_rect();
+
+    if down {
+        rect.bottom() >= bounds.bottom() - slack
+    } else {
+        rect.top() <= bounds.top() + slack
+    }
+}
+
+/// Whether the caret is at the very start or end of the block's content,
+/// judged by position rather than by where it was painted.
+fn at_content_edge(document: &Document, block: &Element, caret: &Range, down: bool) -> bool {
+    let Ok(content) = document.create_range() else {
+        return false;
+    };
+    if content.select_node_contents(block).is_err() {
+        return false;
+    }
+
+    match down {
+        true => content
+            .compare_boundary_points(Range::END_TO_END, caret)
+            .is_ok_and(|order| order <= 0),
+        false => content
+            .compare_boundary_points(Range::START_TO_START, caret)
+            .is_ok_and(|order| order >= 0),
+    }
+}
+
+/// The editable block before or after this one, in reading order.
+fn neighbour(content: &Element, block: &Element, down: bool) -> Option<Element> {
+    let blocks = select(content, &format!("[{LINE}]"));
+    let index = blocks.iter().position(|candidate| candidate == block)?;
+
+    match down {
+        true => blocks.get(index + 1).cloned(),
+        false => index
+            .checked_sub(1)
+            .and_then(|index| blocks.get(index).cloned()),
+    }
+}
+
+/// Puts the caret at the end of `element`.
+pub fn focus_end(document: &Document, element: &Element) -> Option<()> {
+    let html: &web_sys::HtmlElement = element.unchecked_ref();
+    let _ = html.focus();
+
+    let selection = document.get_selection().ok()??;
+    let range = document.create_range().ok()?;
+    range.select_node_contents(element).ok()?;
+    range.collapse_with_to_start(false);
+    selection.remove_all_ranges().ok()?;
+    selection.add_range(&range).ok()?;
+    Some(())
+}
+
 /// Puts the caret at the start of `element`.
 pub fn focus(document: &Document, element: &Element) {
     let html: &web_sys::HtmlElement = element.unchecked_ref();
@@ -1358,7 +1480,9 @@ pub fn focus(document: &Document, element: &Element) {
         return;
     };
 
-    let _ = range.set_start(element, 0);
+    // Inside the content rather than at the element's own offset zero: a caret
+    // placed there has no rectangle, and the edge test has nothing to measure.
+    let _ = range.select_node_contents(element);
     range.collapse_with_to_start(true);
     let _ = selection.remove_all_ranges();
     let _ = selection.add_range(&range);

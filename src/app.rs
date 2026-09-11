@@ -70,6 +70,9 @@ body{margin:0;padding:1.25rem 1.5rem}
 .admonitionblock.important>table td.icon .title::before{content:"\2757"}
 .admonitionblock.warning>table td.icon .title::before{content:"\26A0\FE0F"}
 .admonitionblock.caution>table td.icon .title::before{content:"\1F525"}
+/* Where a new block would be added, while the panel asking for one is open. */
+[data-edit-insert-after]{position:relative}
+[data-edit-insert-after]::after{content:"";position:absolute;left:0;right:0;bottom:-.55rem;height:2px;border-radius:2px;background:#7fb4ff}
 </style></head>
 <body class="article"><div id="content"></div></body></html>"#;
 
@@ -100,6 +103,9 @@ pub fn App() -> impl IntoView {
     let image_url = RwSignal::new(String::new());
     let image_alt = RwSignal::new(String::new());
     let notice = RwSignal::new(None::<String>);
+    // Where a new block would go, taken when the panel opens: filling it in
+    // moves focus out of the document, which would otherwise lose the answer.
+    let insert_after = RwSignal::new(None::<wysiwyg::Block>);
 
     // The block being edited in place, if any. While it is set the preview is
     // left alone: re-rendering under a live caret would destroy it.
@@ -259,10 +265,13 @@ pub fn App() -> impl IntoView {
     };
 
     let insert_image = move |target: String, alt: String| {
-        if let Some(document) = preview_document(frame) {
-            let block = source::image_macro(&target, &alt);
-            wysiwyg::insert_block_below(&document, source, &block, &rerender);
-        }
+        let block = source::image_macro(&target, &alt);
+        wysiwyg::insert_block_below(
+            source,
+            insert_after.get_untracked().map(|block| block.end),
+            &block,
+            &rerender,
+        );
 
         image_panel.set(false);
         image_url.set(String::new());
@@ -324,6 +333,14 @@ pub fn App() -> impl IntoView {
             wysiwyg::set_list(&document, source, marker, &rerender);
         }
     };
+
+    // Show in the document itself where a new block would land.
+    Effect::new(move |_| {
+        let target = image_panel.get().then(|| insert_after.get()).flatten();
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::mark_insertion_point(&document, target.map(|block| block.line));
+        }
+    });
 
     // Render whenever the source settles, the mode changes, or the iframe
     // becomes ready.
@@ -552,7 +569,9 @@ pub fn App() -> impl IntoView {
                 class:active=move || image_panel.get()
                 on:click=move |_| {
                     notice.set(None);
-                    image_panel.update(|open| *open = !*open);
+                    let opening = !image_panel.get_untracked();
+                    insert_after.set(opening.then(|| editing.get_untracked()).flatten());
+                    image_panel.set(opening);
                 }
             >
                 "🖼"
@@ -746,6 +765,13 @@ pub fn App() -> impl IntoView {
 
         <Show when=move || image_panel.get()>
             <div class="panel">
+                <span class="chip">
+                    {move || match insert_after.get() {
+                        Some(block) => format!("Below the {}", describe(block.kind).to_lowercase()),
+                        None => "At the end of the document".to_string(),
+                    }}
+                </span>
+
                 <label>
                     "Image URL or path"
                     <input
