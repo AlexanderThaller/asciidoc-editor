@@ -10,11 +10,13 @@ interface is [Leptos].
 
 <!--
   Absolute, not relative: this README is copied into the npm package, and
-  npmjs.com cannot resolve a path into the repository.
+  npmjs.com cannot resolve a path into the repository. And media., not raw.,
+  because the screenshot is held in git-lfs — raw.githubusercontent.com hands
+  back the pointer file rather than the image.
 -->
 ![A paragraph selected in the editor. The bar above it says what the block is
 and offers to give it a title, and the document around it stays
-rendered.](https://raw.githubusercontent.com/AlexanderThaller/asciidoc-editor/main/docs/screenshot.png)
+rendered.](https://media.githubusercontent.com/media/AlexanderThaller/asciidoc-editor/main/docs/screenshot.png)
 
 ## Using it in a page
 
