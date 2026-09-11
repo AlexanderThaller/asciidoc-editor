@@ -20,6 +20,9 @@
           rustc
           clippy
           rustfmt
+          # rustc links wasm32 with lld and nixpkgs does not bundle one. A
+          # system lld on PATH hides that, which is how it reached CI.
+          lld
           wasm-bindgen-cli_0_2_127
           binaryen
           nodejs
