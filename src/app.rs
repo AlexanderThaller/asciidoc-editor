@@ -106,6 +106,8 @@ pub fn App() -> impl IntoView {
     // Where a new block would go, taken when the panel opens: filling it in
     // moves focus out of the document, which would otherwise lose the answer.
     let insert_after = RwSignal::new(None::<wysiwyg::Block>);
+    // Set when the panel is changing an image rather than adding one.
+    let editing_image = RwSignal::new(None::<wysiwyg::Block>);
 
     // The block being edited in place, if any. While it is set the preview is
     // left alone: re-rendering under a live caret would destroy it.
@@ -265,14 +267,17 @@ pub fn App() -> impl IntoView {
     };
 
     let insert_image = move |target: String, alt: String| {
-        let block = source::image_macro(&target, &alt);
-        wysiwyg::insert_block_below(
-            source,
-            insert_after.get_untracked().map(|block| block.end),
-            &block,
-            &rerender,
-        );
+        match editing_image.get_untracked() {
+            Some(block) => wysiwyg::update_image(source, block, &target, &alt, &rerender),
+            None => wysiwyg::insert_block_below(
+                source,
+                insert_after.get_untracked().map(|block| block.end),
+                &source::image_macro(&target, &alt),
+                &rerender,
+            ),
+        }
 
+        editing_image.set(None);
         image_panel.set(false);
         image_url.set(String::new());
         image_alt.set(String::new());
@@ -306,6 +311,37 @@ pub fn App() -> impl IntoView {
     let apply_column = move |add: bool| {
         if let Some(document) = preview_document(frame) {
             wysiwyg::table_column(&document, source, add, &rerender);
+        }
+    };
+
+    // Reopens the panel over the image it came from, filled in with what is
+    // already there.
+    let edit_image = move || {
+        let Some(document) = preview_document(frame) else {
+            return;
+        };
+        let Some(block) = document
+            .active_element()
+            .filter(|block| block.has_attribute("data-edit-image"))
+        else {
+            return;
+        };
+
+        let Some((target, alt)) = wysiwyg::image_of(&block) else {
+            return;
+        };
+
+        image_url.set(target);
+        image_alt.set(alt);
+        editing_image.set(editing.get_untracked());
+        insert_after.set(None);
+        notice.set(None);
+        image_panel.set(true);
+    };
+
+    let drop_image = move || {
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::remove_image(&document, source, &rerender);
         }
     };
 
@@ -426,6 +462,7 @@ pub fn App() -> impl IntoView {
                                         wysiwyg::Kind::Title
                                             | wysiwyg::Kind::Admonition(_)
                                             | wysiwyg::Kind::Table { .. }
+                                            | wysiwyg::Kind::Image
                                     )
                                 })
                         }
@@ -470,6 +507,7 @@ pub fn App() -> impl IntoView {
                                         wysiwyg::Kind::Title
                                             | wysiwyg::Kind::Admonition(_)
                                             | wysiwyg::Kind::Table { .. }
+                                            | wysiwyg::Kind::Image
                                     )
                                 })
                         }
@@ -497,6 +535,7 @@ pub fn App() -> impl IntoView {
                                         | wysiwyg::Kind::Title
                                         | wysiwyg::Kind::Admonition(_)
                                         | wysiwyg::Kind::Table { .. }
+                                        | wysiwyg::Kind::Image
                                 )
                             })
                         }
@@ -523,6 +562,7 @@ pub fn App() -> impl IntoView {
                                                     | wysiwyg::Kind::Title
                                                     | wysiwyg::Kind::Admonition(_)
                                                     | wysiwyg::Kind::Table { .. }
+                                                    | wysiwyg::Kind::Image
                                             )
                                         })
                                     }
@@ -570,6 +610,9 @@ pub fn App() -> impl IntoView {
                 on:click=move |_| {
                     notice.set(None);
                     let opening = !image_panel.get_untracked();
+                    editing_image.set(None);
+                    image_url.set(String::new());
+                    image_alt.set(String::new());
                     insert_after.set(opening.then(|| editing.get_untracked()).flatten());
                     image_panel.set(opening);
                 }
@@ -625,6 +668,7 @@ pub fn App() -> impl IntoView {
                         let is_list = matches!(block.kind, wysiwyg::Kind::List { .. });
                         let is_admonition = matches!(block.kind, wysiwyg::Kind::Admonition(_));
                         let is_table = matches!(block.kind, wysiwyg::Kind::Table { .. });
+                        let is_image = block.kind == wysiwyg::Kind::Image;
                         let fixed_columns = block.kind
                             == wysiwyg::Kind::Table {
                                 fixed_columns: true,
@@ -671,6 +715,26 @@ pub fn App() -> impl IntoView {
                                     title="Turn this back into an ordinary paragraph"
                                     on:mousedown=|ev| ev.prevent_default()
                                     on:click=move |_| apply_admonition(None)
+                                >
+                                    "Remove"
+                                </button>
+                            </Show>
+
+                            <Show when=move || is_image>
+                                <span class="separator"></span>
+                                <button
+                                    class="button"
+                                    title="Point this image somewhere else, or describe it differently"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| edit_image()
+                                >
+                                    "Edit image"
+                                </button>
+                                <button
+                                    class="button danger"
+                                    title="Delete this image"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| drop_image()
                                 >
                                     "Remove"
                                 </button>
@@ -766,9 +830,12 @@ pub fn App() -> impl IntoView {
         <Show when=move || image_panel.get()>
             <div class="panel">
                 <span class="chip">
-                    {move || match insert_after.get() {
-                        Some(block) => format!("Below the {}", describe(block.kind).to_lowercase()),
-                        None => "At the end of the document".to_string(),
+                    {move || match (editing_image.get(), insert_after.get()) {
+                        (Some(_), _) => "Changing this image".to_string(),
+                        (None, Some(block)) => {
+                            format!("Below the {}", describe(block.kind).to_lowercase())
+                        }
+                        (None, None) => "At the end of the document".to_string(),
                     }}
                 </span>
 
@@ -796,7 +863,7 @@ pub fn App() -> impl IntoView {
                     disabled=move || image_url.get().trim().is_empty()
                     on:click=move |_| insert_image(image_url.get_untracked(), image_alt.get_untracked())
                 >
-                    "Link to it"
+                    {move || if editing_image.get().is_some() { "Update" } else { "Link to it" }}
                 </button>
 
                 <span class="separator"></span>
@@ -819,6 +886,7 @@ pub fn App() -> impl IntoView {
                     class="button"
                     on:click=move |_| {
                         notice.set(None);
+                        editing_image.set(None);
                         image_panel.set(false);
                     }
                 >
@@ -910,6 +978,7 @@ fn describe(kind: wysiwyg::Kind) -> String {
         wysiwyg::Kind::Title => "Block title".to_string(),
         wysiwyg::Kind::Admonition(label) => label.to_string(),
         wysiwyg::Kind::Table { .. } => "Table cell".to_string(),
+        wysiwyg::Kind::Image => "Image".to_string(),
     }
 }
 

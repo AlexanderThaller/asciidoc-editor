@@ -57,6 +57,9 @@ pub enum Kind {
     /// An inline admonition, such as `NOTE: mind the gap`, labelled with one
     /// of [`source::ADMONITIONS`].
     Admonition(&'static str),
+    /// An image block. It has no text to edit, so it is focused rather than
+    /// typed into, and changed through the panel that made it.
+    Image,
     /// A cell of a table. Every cell writes the whole table back.
     Table {
         /// Whether the column count is pinned by a `cols` attribute that this
@@ -84,6 +87,9 @@ const LEAD: &str = "data-edit-lead";
 const SHAPE: &str = "data-edit-shape";
 /// Marks the block that a new one would be added below.
 const INSERT: &str = "data-edit-insert-after";
+/// An image block, along with what it points at and how it is described.
+const IMAGE: &str = "data-edit-image";
+const IMAGE_ALT: &str = "data-edit-image-alt";
 /// Marks a table whose `cols` attribute cannot be kept in step, and whose
 /// columns therefore cannot be changed here.
 const FIXED: &str = "data-edit-fixed-columns";
@@ -153,6 +159,26 @@ pub fn mark_editable(content: &Element, src: &str) {
         }
 
         offer(&items, range, Kind::Body, &source::text_of(src, range));
+    }
+
+    for image in select(content, "div.imageblock[data-source-line]") {
+        let Some(line) = line_of(&image) else {
+            continue;
+        };
+
+        let range = source::paragraph_range(src, line);
+        let Some((target, alt)) = source::image_parts(&source::text_of(src, range)) else {
+            let _ = image.set_attribute("title", REFUSED);
+            continue;
+        };
+
+        // Nothing here is typed into, so the block is focusable rather than
+        // editable: the panel that made it is where it changes.
+        let _ = image.set_attribute("tabindex", "0");
+        let _ = image.set_attribute(IMAGE, &target);
+        let _ = image.set_attribute(IMAGE_ALT, &alt);
+        let _ = image.set_attribute(LINE, &range.start.to_string());
+        let _ = image.set_attribute(END, &range.end.to_string());
     }
 
     for table in select(content, "table[data-source-line]") {
@@ -406,6 +432,10 @@ fn kind_of(block: &Element) -> Kind {
         return Kind::Title;
     }
 
+    if block.has_attribute(IMAGE) {
+        return Kind::Image;
+    }
+
     if block.has_attribute(SHAPE) {
         return Kind::Table {
             fixed_columns: block.has_attribute(FIXED),
@@ -571,6 +601,57 @@ where
 
     source.set(edited);
     rerender(Some(first));
+}
+
+/// What an image block points at, and how it is described.
+pub fn image_of(block: &Element) -> Option<(String, String)> {
+    Some((
+        block.get_attribute(IMAGE)?,
+        block.get_attribute(IMAGE_ALT).unwrap_or_default(),
+    ))
+}
+
+/// Points an image block at something else, or describes it differently.
+pub fn update_image<R>(
+    source: RwSignal<String>,
+    block: Block,
+    target: &str,
+    alt: &str,
+    rerender: &R,
+) where
+    R: Fn(Option<usize>),
+{
+    source.set(source::replace(
+        &source.get_untracked(),
+        LineRange {
+            start: block.line,
+            end: block.end,
+        },
+        &source::image_macro(target, alt),
+    ));
+
+    rerender(Some(block.line));
+}
+
+/// Removes the focused image, and any title that came with it.
+pub fn remove_image<R>(document: &Document, source: RwSignal<String>, rerender: &R)
+where
+    R: Fn(Option<usize>),
+{
+    let Some(block) = focused(document).filter(|block| block.has_attribute(IMAGE)) else {
+        return;
+    };
+
+    // From the block's own first line, so an attached title goes with it.
+    let (Some(start), Some(end)) = (line_of(&block), attr(&block, END)) else {
+        return;
+    };
+
+    source.set(source::remove_lines(
+        &source.get_untracked(),
+        LineRange { start, end },
+    ));
+    rerender(None);
 }
 
 /// Adds a block of its own below the block ending at `after`, or at the end of
@@ -823,9 +904,11 @@ pub fn attach<R, T>(
                 && !ev.meta_key()
             {
                 let down = ev.key() == "ArrowDown";
-                if at_edge(&document, &block, down)
-                    && let Some(next) = neighbour(&content, &block, down)
-                {
+                // A block with no text has no caret to sit at the edge of.
+                let leaving =
+                    !block.has_attribute("contenteditable") || at_edge(&document, &block, down);
+
+                if leaving && let Some(next) = neighbour(&content, &block, down) {
                     ev.prevent_default();
                     if down {
                         focus(&document, &next);
@@ -1459,6 +1542,10 @@ pub fn focus_end(document: &Document, element: &Element) -> Option<()> {
     let html: &web_sys::HtmlElement = element.unchecked_ref();
     let _ = html.focus();
 
+    if !element.has_attribute("contenteditable") {
+        return Some(());
+    }
+
     let selection = document.get_selection().ok()??;
     let range = document.create_range().ok()?;
     range.select_node_contents(element).ok()?;
@@ -1472,6 +1559,12 @@ pub fn focus_end(document: &Document, element: &Element) -> Option<()> {
 pub fn focus(document: &Document, element: &Element) {
     let html: &web_sys::HtmlElement = element.unchecked_ref();
     let _ = html.focus();
+
+    // An image is focused but never typed into; a caret inside it would be a
+    // caret in nothing.
+    if !element.has_attribute("contenteditable") {
+        return;
+    }
 
     let (Some(selection), Ok(range)) = (
         document.get_selection().ok().flatten(),

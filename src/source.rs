@@ -67,6 +67,23 @@ pub fn image_macro(target: &str, alt: &str) -> String {
     )
 }
 
+/// The target and description of an image macro.
+///
+/// Returns `None` for a macro carrying anything else — a width, a role, a
+/// named attribute — since rewriting the line from a target and a description
+/// alone would drop it.
+pub fn image_parts(line: &str) -> Option<(String, String)> {
+    let rest = line.trim().strip_prefix("image::")?;
+    let (target, attributes) = rest.rsplit_once('[')?;
+    let attributes = attributes.strip_suffix(']')?;
+
+    if attributes.contains('=') || attributes.contains(',') {
+        return None;
+    }
+
+    Some((target.to_string(), attributes.replace("\\]", "]")))
+}
+
 /// Inserts `text` as a line of its own before `line`.
 pub fn insert_line(src: &str, line: usize, text: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
@@ -533,6 +550,29 @@ mod tests {
             insert_block(closed, 6, "image::x.png[]"),
             "= T\n\n|===\n| a\n|===\n\nimage::x.png[]\n\nAfter\n"
         );
+    }
+
+    #[test]
+    fn reads_image_macros_back() {
+        assert_eq!(
+            image_parts("image::x.png[A dot]"),
+            Some(("x.png".to_string(), "A dot".to_string()))
+        );
+        assert_eq!(
+            image_parts("image::data:image/png;base64,AAAA[shot]"),
+            Some(("data:image/png;base64,AAAA".to_string(), "shot".to_string()))
+        );
+        assert_eq!(
+            image_parts("image::x.png[]"),
+            Some(("x.png".to_string(), String::new()))
+        );
+    }
+
+    #[test]
+    fn leaves_alone_image_macros_carrying_more() {
+        assert_eq!(image_parts("image::x.png[Alt,width=300]"), None);
+        assert_eq!(image_parts("image::x.png[alt=Alt]"), None);
+        assert_eq!(image_parts("Not an image"), None);
     }
 
     #[test]
