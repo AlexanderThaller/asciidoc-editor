@@ -71,15 +71,14 @@ jobs:
             exit 1
           fi
 
-          # Whether GitHub handed this job the means to mint an OIDC token.
-          # Never the token itself, only that it is there.
+          # The identity npm presents to the registry. It must match the
+          # trusted publisher recorded against the package, which is what
+          # `npm trust list asciidoc-editor` shows; a missing record fails
+          # here as "package not found", however published the package is.
           ref="${GITHUB_WORKFLOW_REF%@*}"
-          echo "OIDC endpoint offered: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
-          echo "OIDC request token:   ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
-          echo "repository:           $GITHUB_REPOSITORY"
-          echo "workflow file:        ${ref##*/}"
-          echo "npm $(npm --version), node $(node --version)"
+          echo "repository:    $GITHUB_REPOSITORY"
+          echo "workflow file: ${ref##*/}"
 
           # Run npm directly rather than through `nix develop`: one less thing
           # between GitHub's OIDC variables and the process that needs them.
-          npm publish ./pkg --loglevel verbose
+          npm publish ./pkg

@@ -120,6 +120,14 @@ very first release has to be published by hand.
    repository, workflow `release.yml`.
 3. Every release after that is the tag above.
 
+The trusted publisher is a record against the package, not against the
+repository, and `npm publish` fails with "package not found" when it is
+missing — whatever the package's own state. `npm trust list asciidoc-editor`
+shows it; `npm trust github asciidoc-editor --file release.yml --repo
+AlexanderThaller/asciidoc-editor --allow-publish` creates it. The publish
+grant is not implied, and the environment must be left unset, because the
+workflow declares none.
+
 ## Licence
 
 MIT. See `LICENSE`.
