@@ -363,6 +363,27 @@ pub fn App() -> impl IntoView {
         storage::read_data_url(&file, move |data| insert_image(data, alt.clone()));
     };
 
+    // Clicking the wrapper a block already has takes it off again.
+    let apply_wrapper = move |style: &'static str| {
+        let wanted = match editing.get_untracked().and_then(|block| block.inside) {
+            Some(current) if current == style => None,
+            _ => Some(style),
+        };
+
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::set_wrapper(&document, source, wanted, &rerender);
+        }
+    };
+
+    let insert_below = move |text: &'static str| {
+        wysiwyg::insert_block_below(
+            source,
+            editing.get_untracked().map(|block| block.end),
+            text,
+            &rerender,
+        );
+    };
+
     let apply_column = move |add: bool| {
         if let Some(document) = preview_document(frame) {
             wysiwyg::table_column(&document, source, add, &rerender);
@@ -629,6 +650,30 @@ pub fn App() -> impl IntoView {
                     >
                         "Body"
                     </button>
+                    <button
+                        class="button"
+                        title="Quote block"
+                        disabled=move || editing.get().is_none()
+                        class:active=move || {
+                            editing.get().and_then(|block| block.inside) == Some("quote")
+                        }
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_wrapper("quote")
+                    >
+                        "Quote"
+                    </button>
+                    <button
+                        class="button"
+                        title="Code block"
+                        disabled=move || editing.get().is_none()
+                        class:active=move || {
+                            editing.get().and_then(|block| block.inside) == Some("source")
+                        }
+                        on:mousedown=|ev| ev.prevent_default()
+                        on:click=move |_| apply_wrapper("source")
+                    >
+                        "Code"
+                    </button>
                     {HEADINGS
                         .iter()
                         .map(|(label, level)| {
@@ -686,6 +731,22 @@ pub fn App() -> impl IntoView {
             </button>
 
             <span class="separator"></span>
+            <button
+                class="button icon"
+                title="Insert a table"
+                on:mousedown=|ev| ev.prevent_default()
+                on:click=move |_| insert_below(source::NEW_TABLE)
+            >
+                "▦"
+            </button>
+            <button
+                class="button icon"
+                title="Insert a thematic break"
+                on:mousedown=|ev| ev.prevent_default()
+                on:click=move |_| insert_below(source::RULE)
+            >
+                "—"
+            </button>
             <button
                 class="button icon"
                 title="Insert an image"

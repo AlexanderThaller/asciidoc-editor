@@ -36,6 +36,8 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Block {
     pub line: usize,
+    /// The delimited block this one sits inside, if any.
+    pub inside: Option<&'static str>,
     /// Last line of the block's source.
     pub end: usize,
     pub kind: Kind,
@@ -534,6 +536,27 @@ fn block_title_in(block: &Element) -> Option<Element> {
     block.query_selector(":scope > .title").ok()?
 }
 
+/// Delimited blocks a paragraph can be wrapped in, by the class the renderer
+/// gives them and the style the source writes.
+const WRAPPERS: [(&str, &str); 4] = [
+    ("quoteblock", "quote"),
+    ("verseblock", "verse"),
+    ("listingblock", "source"),
+    ("literalblock", "literal"),
+];
+
+/// The style of the delimited block the element sits inside.
+fn enclosing_style(block: &Element) -> Option<&'static str> {
+    let wrapper = block
+        .closest("div.quoteblock, div.verseblock, div.listingblock, div.literalblock")
+        .ok()??;
+
+    WRAPPERS
+        .iter()
+        .find(|(class, _)| wrapper.class_list().contains(class))
+        .map(|(_, style)| *style)
+}
+
 fn kind_of(block: &Element) -> Kind {
     if block.has_attribute(TITLE) {
         return Kind::Title;
@@ -774,6 +797,52 @@ where
     rerender(None);
 }
 
+/// Wraps the focused block in a delimited block, or takes the wrapping away.
+///
+/// Wrapping an already-wrapped block swaps one for the other rather than
+/// nesting: a paragraph that reads as a quote is not also a listing.
+pub fn set_wrapper<R>(
+    document: &Document,
+    source: RwSignal<String>,
+    style: Option<&str>,
+    rerender: &R,
+) -> Option<()>
+where
+    R: Fn(Option<usize>),
+{
+    let block = focused(document)?;
+    let text = serialize(&block);
+    let src = source.get_untracked();
+
+    let enclosing = block
+        .closest("div.quoteblock, div.verseblock, div.listingblock, div.literalblock")
+        .ok()
+        .flatten();
+
+    let range = match &enclosing {
+        Some(wrapper) => source::block_range(&src, line_of(wrapper)?)?,
+        None => LineRange {
+            start: attr(&block, LINE)?,
+            end: attr(&block, END)?,
+        },
+    };
+
+    let replacement = match style {
+        Some(style) => source::as_wrapped(&text, style),
+        None => text,
+    };
+
+    source.set(source::replace(&src, range, &replacement));
+
+    // The caret belongs with the words, which a wrapper puts two lines down:
+    // its style, then the fence that opens it.
+    rerender(Some(match style {
+        Some(_) => range.start + 2,
+        None => range.start,
+    }));
+    Some(())
+}
+
 /// Adds a block of its own below the block ending at `after`, or at the end of
 /// the document when there is none.
 ///
@@ -972,6 +1041,7 @@ pub fn attach<R, T>(
         editing.set(editable_target(&ev).and_then(|block| {
             Some(Block {
                 line: attr(&block, LINE)?,
+                inside: enclosing_style(&block),
                 end: attr(&block, END).or_else(|| attr(&block, LINE))?,
                 kind: kind_of(&block),
                 title_line: title_line_of(&block),

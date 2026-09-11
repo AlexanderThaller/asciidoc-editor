@@ -425,6 +425,23 @@ pub fn verbatim_range(src: &str, start: usize) -> Option<LineRange> {
     })
 }
 
+/// Wraps `text` in a delimited block of `style`.
+pub fn as_wrapped(text: &str, style: &str) -> String {
+    let fence = match style {
+        "source" | "listing" => "----",
+        "literal" => "....",
+        _ => "____",
+    };
+
+    format!("[{style}]\n{fence}\n{}\n{fence}", text.trim())
+}
+
+/// An empty table, for a document that has none yet.
+pub const NEW_TABLE: &str = "|===\n| Heading | Heading\n\n| Cell | Cell\n|===";
+
+/// A thematic break.
+pub const RULE: &str = "'''";
+
 /// Every line of the delimited block starting at `start`, its attachments and
 /// delimiters included.
 pub fn block_range(src: &str, start: usize) -> Option<LineRange> {
@@ -586,6 +603,15 @@ mod tests {
     fn paragraph_extends_to_the_next_blank_line() {
         assert_eq!(paragraph_range(DOC, 3), LineRange { start: 3, end: 4 });
         assert_eq!(paragraph_range(DOC, 8), LineRange { start: 8, end: 8 });
+    }
+
+    #[test]
+    fn wraps_text_in_a_delimited_block() {
+        assert_eq!(as_wrapped("Words", "quote"), "[quote]\n____\nWords\n____");
+        assert_eq!(
+            as_wrapped("fn main() {}", "source"),
+            "[source]\n----\nfn main() {}\n----"
+        );
     }
 
     #[test]
