@@ -1124,6 +1124,7 @@ pub fn App() -> impl IntoView {
                                 editing,
                                 rerender,
                                 travel,
+                                embed_image,
                             );
                         }
 

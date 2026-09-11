@@ -1017,16 +1017,18 @@ fn shift_lines_below(content: &Element, start: usize, added: usize, removed: usi
 ///
 /// `rerender` re-renders the document and, given a line, puts the caret at the
 /// start of the block that came from it.
-pub fn attach<R, T>(
+pub fn attach<R, T, F>(
     document: &Document,
     content: Element,
     source: RwSignal<String>,
     editing: RwSignal<Option<Block>>,
     rerender: R,
     travel: T,
+    on_file: F,
 ) where
     R: Fn(Option<usize>) + Clone + 'static,
     T: Fn(bool) + 'static,
+    F: Fn(web_sys::File) + Clone + 'static,
 {
     let on_input = {
         let content = content.clone();
@@ -1157,6 +1159,50 @@ pub fn attach<R, T>(
         }
     };
 
+    // Content arriving from outside: a picture becomes a block of its own,
+    // and anything else comes in as plain text. Pasted markup would otherwise
+    // reach the document as structure it cannot write back, and be quietly
+    // flattened at the next render.
+    let on_paste = {
+        let document = document.clone();
+        let on_file = on_file.clone();
+        move |ev: web_sys::ClipboardEvent| {
+            let Some(data) = ev.clipboard_data() else {
+                return;
+            };
+
+            if let Some(file) = first_image(&data) {
+                ev.prevent_default();
+                on_file(file);
+                return;
+            }
+
+            if editable_target(ev.as_ref()).is_none() {
+                return;
+            }
+
+            let text = data.get_data("text/plain").unwrap_or_default();
+            ev.prevent_default();
+
+            let commands: &HtmlDocument = document.unchecked_ref();
+            let _ = commands.exec_command_with_show_ui_and_value("insertText", false, &text);
+        }
+    };
+
+    // The browser would otherwise open the file in place of the document.
+    let on_drag_over = |ev: web_sys::DragEvent| ev.prevent_default();
+    let on_drop = move |ev: web_sys::DragEvent| {
+        let Some(file) = ev.data_transfer().and_then(|data| first_image(&data)) else {
+            return;
+        };
+
+        ev.prevent_default();
+        on_file(file);
+    };
+
+    listen(document, "paste", on_paste);
+    listen(document, "dragover", on_drag_over);
+    listen(document, "drop", on_drop);
     listen(document, "input", on_input);
     listen(document, "focusin", on_focus_in);
     listen(document, "focusout", on_focus_out);
@@ -1875,6 +1921,15 @@ fn editable_target(ev: &Event) -> Option<Element> {
         .unchecked_into::<Element>()
         .closest(&format!("[{LINE}]"))
         .ok()?
+}
+
+/// The first image among what was pasted or dropped.
+fn first_image(data: &web_sys::DataTransfer) -> Option<web_sys::File> {
+    let files = data.files()?;
+
+    (0..files.length())
+        .filter_map(|index| files.get(index))
+        .find(|file| file.type_().starts_with("image/"))
 }
 
 fn listen<E, F>(document: &Document, event: &str, handler: F)
