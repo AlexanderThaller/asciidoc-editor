@@ -73,15 +73,18 @@ const LINKED_SCHEMES: [&str; 6] = [
     "http://", "https://", "ftp://", "mailto:", "irc:", "file://",
 ];
 
+/// Whether AsciiDoc reads this target as a link without being told.
+pub fn is_linkable(url: &str) -> bool {
+    LINKED_SCHEMES.iter().any(|scheme| url.starts_with(scheme))
+}
+
 /// Writes a link to `url`, shown as `label`.
 pub fn link_macro(url: &str, label: &str) -> String {
     let url = url.trim();
     let label = label.replace(']', "\\]");
     let label = label.trim();
 
-    let bare = LINKED_SCHEMES.iter().any(|scheme| url.starts_with(scheme));
-
-    match bare {
+    match is_linkable(url) {
         true => format!("{url}[{label}]"),
         false => format!("link:{url}[{label}]"),
     }

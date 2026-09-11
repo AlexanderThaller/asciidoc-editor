@@ -41,13 +41,14 @@ pub fn to_asciidoc(nodes: &[Inline]) -> String {
             Inline::LineBreak => out.push('\n'),
             Inline::Link { href, children } => {
                 let text = to_asciidoc(children);
-                out.push_str(href);
-                // A bare URL renders as itself; only a differing label needs
-                // the macro's bracket form.
-                if !text.is_empty() && text != *href {
-                    out.push('[');
-                    out.push_str(&text);
-                    out.push(']');
+
+                // A recognised target shown as itself renders from the bare
+                // URL; anything else needs the macro, and a target AsciiDoc
+                // would not recognise needs it spelled out.
+                if text == *href && crate::source::is_linkable(href) {
+                    out.push_str(href);
+                } else {
+                    out.push_str(&crate::source::link_macro(href, &text));
                 }
             }
         }
@@ -190,6 +191,18 @@ mod tests {
 
         assert_eq!(to_asciidoc(&[bare]), "https://example.com");
         assert_eq!(to_asciidoc(&[labelled]), "https://example.com[Example]");
+    }
+
+    /// A target AsciiDoc would read as text rather than as a link has to keep
+    /// its macro, or the round trip would quietly turn the link into words.
+    #[test]
+    fn spells_out_links_to_targets_without_a_scheme() {
+        let relative = Inline::Link {
+            href: "guide.html".to_string(),
+            children: vec![text("The guide")],
+        };
+
+        assert_eq!(to_asciidoc(&[relative]), "link:guide.html[The guide]");
     }
 
     #[test]

@@ -87,6 +87,20 @@ const LEAD: &str = "data-edit-lead";
 const SHAPE: &str = "data-edit-shape";
 /// Marks the block that a new one would be added below.
 const INSERT: &str = "data-edit-insert-after";
+/// Set while a panel is open, to keep the rendering still under it.
+const HELD: &str = "data-edit-held";
+
+/// Holds the document still, or lets it settle again.
+pub fn hold(document: &Document, held: bool) {
+    let Some(body) = document.body() else { return };
+
+    if held {
+        let _ = body.set_attribute(HELD, "true");
+    } else {
+        let _ = body.remove_attribute(HELD);
+    }
+}
+
 /// An image block, along with what it points at and how it is described.
 const IMAGE: &str = "data-edit-image";
 const IMAGE_ALT: &str = "data-edit-image-alt";
@@ -882,7 +896,12 @@ pub fn attach<R, T>(
                         .active_element()
                         .is_some_and(|active| active.has_attribute(LINE));
 
-                    if !still_editing {
+                    // A panel takes focus while pointing at something in the
+                    // document; re-rendering now would replace what it points
+                    // at.
+                    let held = document.body().is_some_and(|body| body.has_attribute(HELD));
+
+                    if !still_editing && !held {
                         editing.set(None);
                         rerender(None);
                     }
@@ -1472,74 +1491,64 @@ fn start_pending_block(document: &Document, content: &Element, after: &Element, 
 
 /// Whether a link can be written into this kind of block.
 ///
-/// A list or a table writes back as a whole — markers, rows and all — so an
-/// offset measured against its text would not line up with it.
+/// Anything with text can hold one; an image has none.
 pub fn takes_links(kind: Kind) -> bool {
-    matches!(
-        kind,
-        Kind::Body | Kind::Heading(_) | Kind::Title | Kind::Admonition(_)
-    )
+    kind != Kind::Image
 }
 
-/// Where the selection begins and ends within the focused block's own text,
-/// and what it covers.
-pub fn selection_span(document: &Document) -> Option<(usize, usize, usize, String)> {
+/// The selection as it stands, and the text it covers.
+///
+/// The range is kept alive rather than measured: writing a link is a change
+/// to the document, which every kind of block already knows how to write back
+/// — so there is nothing to measure against, and lists and tables come along
+/// without their markers and rows having to be accounted for.
+pub fn selection_range(document: &Document) -> Option<(Range, String)> {
     let block = focused(document)?;
     if !takes_links(kind_of(&block)) {
         return None;
     }
 
-    let line = attr(&block, LINE)?;
     let selection = document.get_selection().ok()??;
     let range = selection.get_range_at(0).ok()?;
 
-    let start = offset_within(
-        document,
-        &block,
-        &range.start_container().ok()?,
-        range.start_offset().ok()?,
-    )?;
-    let end = offset_within(
-        document,
-        &block,
-        &range.end_container().ok()?,
-        range.end_offset().ok()?,
-    )?;
-
     Some((
-        line,
-        start,
-        end,
+        range.clone_range(),
         selection.to_string().as_string().unwrap_or_default(),
     ))
 }
 
-/// Writes `link` over the span the selection covered.
+/// Writes a link over what the range covers.
 pub fn insert_link<R>(
     document: &Document,
     source: RwSignal<String>,
-    line: usize,
-    span: (usize, usize),
-    link: &str,
+    range: &Range,
+    url: &str,
+    label: &str,
     rerender: &R,
 ) -> Option<()>
 where
     R: Fn(Option<usize>),
 {
     let content = content_of(document)?;
-    let block = content
-        .query_selector(&format!("[{LINE}=\"{line}\"]"))
-        .ok()??;
-
-    let text = serialize(&block);
-    let (start, end) = (span.0.min(text.len()), span.1.min(text.len()));
-    if start > end || !text.is_char_boundary(start) || !text.is_char_boundary(end) {
-        return None;
+    let anchored = range.common_ancestor_container().ok()?;
+    let block = match anchored.node_type() {
+        Node::ELEMENT_NODE => anchored.unchecked_into::<Element>(),
+        _ => anchored.parent_element()?,
     }
+    .closest(&format!("[{LINE}]"))
+    .ok()??;
 
-    let written = format!("{}{link}{}", &text[..start], &text[end..]);
-    write_block(&block, &content, source, &written);
-    rerender(Some(line));
+    let anchor = document.create_element("a").ok()?;
+    anchor.set_attribute("href", url).ok()?;
+    anchor.set_text_content(Some(label));
+
+    range.delete_contents().ok()?;
+    range.insert_node(&anchor).ok()?;
+
+    // The block writes itself back as it always does, so a list keeps its
+    // markers and a table its rows.
+    sync_block(&block, &content, source);
+    rerender(attr(&block, LINE));
     Some(())
 }
 

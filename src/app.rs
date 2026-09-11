@@ -121,7 +121,10 @@ pub fn App() -> impl IntoView {
     let link_panel = RwSignal::new(false);
     let link_url = RwSignal::new(String::new());
     let link_text = RwSignal::new(String::new());
-    let link_span = RwSignal::new(None::<(usize, usize, usize)>);
+    // The selection the link will be written over, kept alive while the panel
+    // is filled in.
+    let link_range = StoredValue::new(None::<web_sys::Range>);
+    let link_selected = RwSignal::new(false);
 
     // The block being edited in place, if any. While it is set the preview is
     // left alone: re-rendering under a live caret would destroy it.
@@ -270,11 +273,12 @@ pub fn App() -> impl IntoView {
         let Some(document) = preview_document(frame) else {
             return;
         };
-        let Some((line, start, end, selected)) = wysiwyg::selection_span(&document) else {
+        let Some((range, selected)) = wysiwyg::selection_range(&document) else {
             return;
         };
 
-        link_span.set(Some((line, start, end)));
+        link_selected.set(!selected.is_empty());
+        link_range.set_value(Some(range));
         link_text.set(selected);
         link_url.set(String::new());
         image_panel.set(false);
@@ -283,17 +287,22 @@ pub fn App() -> impl IntoView {
     };
 
     let add_link = move || {
-        let (Some(document), Some((line, start, end))) =
-            (preview_document(frame), link_span.get_untracked())
+        let (Some(document), Some(range)) = (preview_document(frame), link_range.get_value())
         else {
             return;
         };
 
-        let link = source::link_macro(&link_url.get_untracked(), &link_text.get_untracked());
-        wysiwyg::insert_link(&document, source, line, (start, end), &link, &rerender);
+        wysiwyg::insert_link(
+            &document,
+            source,
+            &range,
+            &link_url.get_untracked(),
+            &link_text.get_untracked(),
+            &rerender,
+        );
 
         link_panel.set(false);
-        link_span.set(None);
+        link_range.set_value(None);
     };
 
     let apply_title = move |add: bool| {
@@ -415,6 +424,15 @@ pub fn App() -> impl IntoView {
             wysiwyg::set_list(&document, source, marker, &rerender);
         }
     };
+
+    // A panel points at something in the document — a block, or a selection —
+    // so the rendering is held still for as long as one is open.
+    Effect::new(move |_| {
+        let open = image_panel.get() || link_panel.get();
+        if let Some(document) = preview_document(frame) {
+            wysiwyg::hold(&document, open);
+        }
+    });
 
     // Show in the document itself where a new block would land.
     Effect::new(move |_| {
@@ -889,9 +907,9 @@ pub fn App() -> impl IntoView {
         <Show when=move || link_panel.get()>
             <div class="panel">
                 <span class="chip">
-                    {move || match link_span.get() {
-                        Some((_, start, end)) if start != end => "Over the selection".to_string(),
-                        _ => "At the caret".to_string(),
+                    {move || match link_selected.get() {
+                        true => "Over the selection",
+                        false => "At the caret",
                     }}
                 </span>
 
