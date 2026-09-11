@@ -14,9 +14,10 @@ interface is [Leptos].
   because the screenshot is held in git-lfs — raw.githubusercontent.com hands
   back the pointer file rather than the image.
 -->
-![A paragraph selected in the editor. The bar above it says what the block is
-and offers to give it a title, and the document around it stays
-rendered.](https://media.githubusercontent.com/media/AlexanderThaller/asciidoc-editor/main/docs/screenshot.png)
+![The editor showing a rendered AsciiDoc document — a title, a table of
+contents, headings, a list, a code block and a table — with the formatting
+toolbar above
+it.](https://media.githubusercontent.com/media/AlexanderThaller/asciidoc-editor/main/docs/screenshot.png)
 
 ## Using it in a page
 
