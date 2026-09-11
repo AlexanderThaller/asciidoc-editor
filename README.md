@@ -14,7 +14,7 @@ interface is [Leptos].
 npm install asciidoc-editor
 ```
 
-Or build it yourself, which is what `npm publish pkg` publishes:
+Or build it yourself, which is what `npm publish ./pkg` publishes:
 
 ```sh
 ./build-package.sh
@@ -82,6 +82,16 @@ open `/demo/`:
 ```sh
 python3 -m http.server 8000
 ```
+
+### Publishing
+
+```sh
+./build-package.sh
+npm publish ./pkg
+```
+
+The leading `./` matters: `npm publish pkg` reads `pkg` as the name of a
+package on the registry and tries to publish that one.
 
 ## Licence
 

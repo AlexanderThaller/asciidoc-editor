@@ -103,4 +103,6 @@ cp README.md LICENSE pkg/
 
 printf '\npkg/ holds:\n'
 ls -lh pkg | awk 'NR > 1 { printf "  %-30s %s\n", $9, $5 }'
-printf '\nto publish: npm publish pkg\n'
+# The path must be a path: `npm publish pkg` reads `pkg` as the name of a
+# package on the registry and tries to publish that one instead.
+printf '\nto publish: npm publish ./pkg\n'
