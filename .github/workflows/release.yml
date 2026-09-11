@@ -39,23 +39,32 @@ jobs:
 
       - run: nix develop --command ./build-package.sh
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-
-      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships with 10.
-      - name: Update npm
-        run: npm install --global npm@latest
-
       - name: Check the tag matches the version being published
         run: |
           tagged="${GITHUB_REF_NAME#v}"
-          packaged=$(node --print 'require("./pkg/package.json").version')
+          packaged=$(nix develop --command node \
+            --print 'require("./pkg/package.json").version')
 
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$tagged" != "$packaged" ]; then
             echo "tag $GITHUB_REF_NAME does not match version $packaged" >&2
             exit 1
           fi
 
-      - run: npm publish ./pkg
+      # Deliberately no actions/setup-node. Given `registry-url` it writes an
+      # .npmrc saying `_authToken=${NODE_AUTH_TOKEN}`, and with no such token —
+      # which is the whole point of trusted publishing — that expands to
+      # nothing. npm reads it, concludes it is already authenticated, never
+      # asks GitHub for an OIDC token, and the registry answers 404.
+      # See actions/setup-node#1551 and npm/cli#9088.
+      #
+      # The flake's npm is 11.17, past the 11.5.1 trusted publishing needs, so
+      # there is nothing setup-node was here to provide.
+      - name: Publish
+        run: |
+          if [ -e ~/.npmrc ] && grep -q _authToken ~/.npmrc; then
+            echo "an _authToken in ~/.npmrc would suppress the OIDC exchange" >&2
+            exit 1
+          fi
+
+          echo "npm $(nix develop --command npm --version)"
+          nix develop --command npm publish ./pkg
