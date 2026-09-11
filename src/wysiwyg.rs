@@ -60,6 +60,9 @@ pub enum Kind {
     /// The attribution under a quote or a verse, which lives in the block's
     /// attribute line rather than in its body.
     Attribution(&'static str),
+    /// A verbatim block — a listing or a literal — whose content is written
+    /// back exactly as it reads, markup and all.
+    Verbatim,
     /// An image block. It has no text to edit, so it is focused rather than
     /// typed into, and changed through the panel that made it.
     Image,
@@ -83,6 +86,8 @@ const MARKER: &str = "data-edit-marker";
 const TITLE: &str = "data-edit-title";
 /// Marks an attribution, holding the style whose line it belongs to.
 const ATTRIBUTION: &str = "data-edit-attribution";
+/// Marks a block whose content is its own source, taken as it stands.
+const VERBATIM: &str = "data-edit-verbatim";
 /// Text the renderer generates in front of a title, such as a table's number.
 const PREFIX: &str = "data-edit-prefix";
 /// Text the source carries in front of the content but the rendering drops,
@@ -178,6 +183,29 @@ pub fn mark_editable(content: &Element, src: &str) {
         }
 
         offer(&items, range, Kind::Body, &source::text_of(src, range));
+    }
+
+    for block in select(
+        content,
+        "div.listingblock[data-source-line], div.literalblock[data-source-line]",
+    ) {
+        let (Some(line), Ok(Some(body))) = (line_of(&block), block.query_selector("pre")) else {
+            continue;
+        };
+
+        let Some(range) = source::verbatim_range(src, line) else {
+            continue;
+        };
+
+        // Nothing is interpreted here, so the comparison is with the text as
+        // the source wrote it.
+        let _ = body.set_attribute(VERBATIM, "true");
+        if verbatim_text(&body) == source::text_of(src, range) {
+            make_editable(&body, range, Kind::Verbatim);
+        } else {
+            let _ = body.remove_attribute(VERBATIM);
+            let _ = block.set_attribute("title", REFUSED);
+        }
     }
 
     for block in select(
@@ -421,7 +449,20 @@ fn make_editable(element: &Element, range: LineRange, kind: Kind) {
 }
 
 /// The block's content as AsciiDoc.
+/// A verbatim block's text as it stands, line breaks included.
+///
+/// `innerText` rather than `textContent`: the browser may write a line break
+/// as an element, which carries no text of its own but is a line all the same.
+fn verbatim_text(element: &Element) -> String {
+    let html: &web_sys::HtmlElement = element.unchecked_ref();
+    html.inner_text().trim_end_matches('\n').to_string()
+}
+
 fn serialize(element: &Element) -> String {
+    if element.has_attribute(VERBATIM) {
+        return verbatim_text(element);
+    }
+
     if let Some(cells) = table_of(element) {
         return cells;
     }
@@ -505,6 +546,10 @@ fn kind_of(block: &Element) -> Kind {
             .find(|known| *known == style)
     }) {
         return Kind::Attribution(style);
+    }
+
+    if block.has_attribute(VERBATIM) {
+        return Kind::Verbatim;
     }
 
     if block.has_attribute(IMAGE) {
@@ -975,8 +1020,9 @@ pub fn attach<R, T>(
             if ev.key() == "Enter" && !ev.shift_key() {
                 // A list handles Enter far better than we could: the browser
                 // starts a new item, and the input that follows writes the
-                // whole list back out.
-                if is_list(&block) {
+                // whole list back out. A verbatim block wants the line break
+                // itself.
+                if is_list(&block) || block.has_attribute(VERBATIM) {
                     return;
                 }
 
@@ -1486,8 +1532,12 @@ fn split_block<R>(
     let text = serialize(block);
 
     // A title belongs to the block below it; splitting it would put a stray
-    // paragraph between the two. A table cell has no line to split at all.
-    if matches!(kind_of(block), Kind::Title | Kind::Table { .. }) {
+    // paragraph between the two. A table cell has no line to split at all,
+    // and a verbatim block takes the line break as content.
+    if matches!(
+        kind_of(block),
+        Kind::Title | Kind::Table { .. } | Kind::Verbatim
+    ) {
         return;
     }
 

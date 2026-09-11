@@ -387,20 +387,53 @@ pub fn table_range(src: &str, start: usize) -> Option<LineRange> {
 }
 
 fn table_delimiters(src: &str, start: usize) -> Option<(usize, usize)> {
+    let (opening, closing, fence) = delimiters(src, start)?;
+    (fence == "|===").then_some((opening, closing))
+}
+
+/// The delimiters of the block starting at `start`, and the fence itself.
+fn delimiters(src: &str, start: usize) -> Option<(usize, usize, String)> {
     let mut opening = start;
     while is_attached(&text_of(src, LineRange::single(opening))) {
         opening += 1;
     }
 
-    if text_of(src, LineRange::single(opening)).trim() != "|===" {
+    let fence = text_of(src, LineRange::single(opening))
+        .trim_end()
+        .to_string();
+    if !is_delimiter(&fence) {
         return None;
     }
 
     let total = src.lines().count();
     let closing = (opening + 1..=total)
-        .find(|line| text_of(src, LineRange::single(*line)).trim() == "|===")?;
+        .find(|line| text_of(src, LineRange::single(*line)).trim_end() == fence)?;
 
-    Some((opening, closing))
+    Some((opening, closing, fence))
+}
+
+/// The lines inside a verbatim block — one fenced by `----` or `....` — whose
+/// content is written back exactly as it stands.
+pub fn verbatim_range(src: &str, start: usize) -> Option<LineRange> {
+    let (opening, closing, fence) = delimiters(src, start)?;
+    let verbatim = fence.starts_with("----") || fence.starts_with("....");
+
+    (verbatim && closing > opening).then_some(LineRange {
+        start: opening + 1,
+        // A block with nothing in it still has a line to write into.
+        end: closing - 1,
+    })
+}
+
+/// Every line of the delimited block starting at `start`, its attachments and
+/// delimiters included.
+pub fn block_range(src: &str, start: usize) -> Option<LineRange> {
+    let (_, closing, _) = delimiters(src, start)?;
+
+    Some(LineRange {
+        start,
+        end: closing,
+    })
 }
 
 /// The source text of `range`.
@@ -553,6 +586,25 @@ mod tests {
     fn paragraph_extends_to_the_next_blank_line() {
         assert_eq!(paragraph_range(DOC, 3), LineRange { start: 3, end: 4 });
         assert_eq!(paragraph_range(DOC, 8), LineRange { start: 8, end: 8 });
+    }
+
+    #[test]
+    fn finds_the_lines_inside_a_verbatim_block() {
+        let listing = "= T\n\n[source,rust]\n----\nfn main() {}\n----\n\nAfter\n";
+
+        assert_eq!(
+            verbatim_range(listing, 3),
+            Some(LineRange { start: 5, end: 5 })
+        );
+        assert_eq!(
+            block_range(listing, 3),
+            Some(LineRange { start: 3, end: 6 })
+        );
+        assert_eq!(
+            verbatim_range("= T\n\n|===\n| a\n|===\n", 3),
+            None,
+            "a table"
+        );
     }
 
     #[test]
