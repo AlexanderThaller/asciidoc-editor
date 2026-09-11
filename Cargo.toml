@@ -2,6 +2,10 @@
 name = "asciidoc-editor"
 version = "0.1.0"
 edition = "2024"
+description = "A WYSIWYG AsciiDoc editor for the web, in Rust and WebAssembly"
+license = "MIT"
+keywords = ["asciidoc", "editor", "wysiwyg", "wasm"]
+categories = ["wasm", "text-editors", "web-programming"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

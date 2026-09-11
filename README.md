@@ -10,15 +10,18 @@ interface is [Leptos].
 
 ## Using it in a page
 
-Build the package:
+```sh
+npm install asciidoc-editor
+```
+
+Or build it yourself, which is what `npm publish pkg` publishes:
 
 ```sh
 ./build-package.sh
 ```
 
-That writes `pkg/`: an ES module, its wasm, and TypeScript types. Serve those
-four files next to your page — there is nothing else to serve, because the
-stylesheets are inside the wasm.
+Either way you get an ES module, its wasm, and TypeScript types — and nothing
+else to serve, because the stylesheets are inside the wasm.
 
 ```html
 <div id="editor" style="height: 34rem"></div>
@@ -35,10 +38,21 @@ stylesheets are inside the wasm.
 
 The editor fills the element it is given, so give that element a height.
 
+Loading the module from a bundler works the same way. The wasm is fetched
+relative to the module (`new URL(..., import.meta.url)`), which Vite, webpack 5
+and esbuild all understand without configuration.
+
+### TypeScript
+
+The types ship with the package. wasm-bindgen writes a `[Symbol.dispose]()` on
+its classes, so a project compiling the package's own declarations needs either
+`"skipLibCheck": true` — which most templates set already — or `"lib"` at
+`ESNext`.
+
 ### `mount(target, options?)`
 
-`target` is a CSS selector or an element. The element keeps whatever classes
-the page put on it.
+`target` is a CSS selector or an element (`MountTarget`). The element keeps
+whatever classes the page put on it.
 
 | Option | Default | |
 |---|---|---|
@@ -68,6 +82,10 @@ open `/demo/`:
 ```sh
 python3 -m http.server 8000
 ```
+
+## Licence
+
+MIT. See `LICENSE`.
 
 ## Developing
 

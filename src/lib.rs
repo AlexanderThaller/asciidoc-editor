@@ -43,6 +43,40 @@ const STYLE_ID: &str = "asciidoc-editor-style";
 /// What the styling hangs off, put on the element the editor is given.
 const CLASS: &str = "asciidoc-editor";
 
+/// The types a TypeScript caller sees. wasm-bindgen would otherwise describe
+/// the options as `object` and the target as `any`, which says nothing about
+/// what either may hold.
+#[wasm_bindgen(typescript_custom_section)]
+const TYPES: &'static str = r#"
+/** What the editor may be told when it is mounted. */
+export interface MountOptions {
+    /** The document to open with. Defaults to a sample document. */
+    value?: string;
+    /** A `localStorage` key to keep the document under. */
+    autosave?: string;
+    /** Start in rich text rather than source. Defaults to `true`. */
+    richText?: boolean;
+}
+
+/** The element to mount into, or a selector naming it. */
+export type MountTarget = Element | string;
+
+/** Called with the document, as AsciiDoc, whenever it changes. */
+export type ChangeCallback = (document: string) => void;
+"#;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "MountOptions")]
+    pub type MountOptions;
+
+    #[wasm_bindgen(typescript_type = "MountTarget")]
+    pub type MountTarget;
+
+    #[wasm_bindgen(typescript_type = "ChangeCallback")]
+    pub type ChangeCallback;
+}
+
 /// A mounted editor.
 ///
 /// Hold on to it: letting it go takes the editor off the page, which is what
@@ -71,8 +105,9 @@ impl Editor {
 
     /// Calls `callback` with the document whenever it changes.
     #[wasm_bindgen(js_name = onChange)]
-    pub fn on_change(&self, callback: js_sys::Function) {
+    pub fn on_change(&self, callback: ChangeCallback) {
         let source = self.source;
+        let callback: js_sys::Function = callback.unchecked_into();
 
         Effect::new(move |_| {
             let document = source.get();
@@ -94,10 +129,10 @@ impl Editor {
 /// `localStorage` key to keep the document under, and `richText` to start in
 /// rich text rather than source (the default).
 #[wasm_bindgen]
-pub fn mount(target: &JsValue, options: Option<js_sys::Object>) -> Result<Editor, JsValue> {
+pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Editor, JsValue> {
     console_error_panic_hook::set_once();
 
-    let host = resolve(target)?;
+    let host = resolve(target.as_ref())?;
     let options = options.map(JsValue::from).unwrap_or(JsValue::UNDEFINED);
 
     let autosave = string_option(&options, "autosave");

@@ -4,7 +4,7 @@
 //! told to keep what is written in local storage.
 
 use asciidoc_editor::mount;
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 
 fn main() {
     let options = js_sys::Object::new();
@@ -14,7 +14,8 @@ fn main() {
         &JsValue::from_str("asciidoc-editor.source"),
     );
 
-    match mount(&JsValue::from_str("body"), Some(options)) {
+    let target = JsValue::from_str("body").unchecked_into();
+    match mount(&target, Some(options.unchecked_into())) {
         // The page is the editor and outlives it; dropping the handle would
         // take the editor straight back off again.
         Ok(editor) => std::mem::forget(editor),
