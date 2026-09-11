@@ -60,6 +60,10 @@ jobs:
       #
       # The flake's npm is 11.17, past the 11.5.1 trusted publishing needs, so
       # there is nothing setup-node was here to provide.
+      # The flake's node, reached without entering the shell for every call.
+      - name: Put the flake's node on PATH
+        run: nix develop --command sh -c 'dirname "$(command -v npm)"' >> "$GITHUB_PATH"
+
       - name: Publish
         run: |
           if [ -e ~/.npmrc ] && grep -q _authToken ~/.npmrc; then
@@ -69,10 +73,13 @@ jobs:
 
           # Whether GitHub handed this job the means to mint an OIDC token.
           # Never the token itself, only that it is there.
+          ref="${GITHUB_WORKFLOW_REF%@*}"
           echo "OIDC endpoint offered: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           echo "OIDC request token:   ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
           echo "repository:           $GITHUB_REPOSITORY"
-          echo "workflow file:        ${GITHUB_WORKFLOW_REF##*/}"
-          echo "npm $(nix develop --command npm --version)"
+          echo "workflow file:        ${ref##*/}"
+          echo "npm $(npm --version), node $(node --version)"
 
-          nix develop --command npm publish ./pkg
+          # Run npm directly rather than through `nix develop`: one less thing
+          # between GitHub's OIDC variables and the process that needs them.
+          npm publish ./pkg --loglevel verbose
