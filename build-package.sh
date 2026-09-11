@@ -65,6 +65,14 @@ cat > pkg/package.json <<JSON
   "version": "$(field version)",
   "description": "$(field description)",
   "license": "$(field license)",
+  "repository": {
+    "type": "git",
+    "url": "git+$(field repository).git"
+  },
+  "homepage": "$(field repository)#readme",
+  "bugs": {
+    "url": "$(field repository)/issues"
+  },
   "type": "module",
   "main": "asciidoc_editor.js",
   "types": "asciidoc_editor.d.ts",

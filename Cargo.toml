@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "A WYSIWYG AsciiDoc editor for the web, in Rust and WebAssembly"
 license = "MIT"
+repository = "https://github.com/AlexanderThaller/asciidoc-editor"
 keywords = ["asciidoc", "editor", "wysiwyg", "wasm"]
 categories = ["wasm", "text-editors", "web-programming"]
 

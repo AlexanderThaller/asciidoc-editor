@@ -85,13 +85,29 @@ python3 -m http.server 8000
 
 ### Publishing
 
+Releases go out from CI, which needs no token and no second factor: npm trusts
+`.github/workflows/release.yml` by name and the runner proves it is that
+workflow with an OIDC token.
+
 ```sh
-./build-package.sh
-npm publish ./pkg
+git tag v0.1.1 && git push origin v0.1.1
 ```
 
-The leading `./` matters: `npm publish pkg` reads `pkg` as the name of a
-package on the registry and tries to publish that one.
+The workflow refuses to publish if the tag and the version in `Cargo.toml`
+disagree.
+
+Setting that trust up is a one-off, and it has an awkward first step: npm will
+only configure a trusted publisher for a package that already exists, so the
+very first release has to be published by hand.
+
+1. `./build-package.sh && npm publish ./pkg` — the leading `./` matters, since
+   `npm publish pkg` reads `pkg` as the name of a package on the registry and
+   tries to publish that one. Publishing by hand needs 2FA on the account: npm
+   now accepts only a security key, added at
+   `npmjs.com/settings/<user>/tfa`.
+2. On the package's settings page at npmjs.com, add a trusted publisher: this
+   repository, workflow `release.yml`.
+3. Every release after that is the tag above.
 
 ## Licence
 

@@ -1,0 +1,65 @@
+# Publishes the package to npm when a version tag is pushed.
+#
+# No token and no second factor: npm trusts this workflow by name, and the
+# proof is an OIDC token GitHub mints for the run. That trust has to be set up
+# once, on the package's settings page at npmjs.com, naming this file.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # What lets the runner prove to npm that it is this workflow.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The generator has to match the wasm-bindgen the crate is built
+      # against, so it comes from the lockfile rather than from `latest`.
+      - name: Install wasm-bindgen
+        run: |
+          version=$(awk '/^name = "wasm-bindgen"$/ { found = 1; next }
+                         found && /^version/ { gsub(/[",]/, "", $3); print $3; exit }' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$version" --locked
+
+      - name: Install wasm-opt
+        run: sudo apt-get update && sudo apt-get install --yes binaryen
+
+      - run: cargo test
+
+      - run: ./build-package.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships with 10.
+      - name: Update npm
+        run: npm install --global npm@latest
+
+      - name: Check the tag matches the version being published
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          packaged=$(node --print 'require("./pkg/package.json").version')
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$tagged" != "$packaged" ]; then
+            echo "tag $GITHUB_REF_NAME does not match version $packaged" >&2
+            exit 1
+          fi
+
+      - run: npm publish ./pkg
