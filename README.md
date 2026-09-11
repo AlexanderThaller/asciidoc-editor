@@ -8,6 +8,14 @@ edited underneath.
 Parsing and rendering are [`asciidoc-parser`] and [`asciidoc-html5`]; the
 interface is [Leptos].
 
+<!--
+  Absolute, not relative: this README is copied into the npm package, and
+  npmjs.com cannot resolve a path into the repository.
+-->
+![A paragraph selected in the editor. The bar above it says what the block is
+and offers to give it a title, and the document around it stays
+rendered.](https://raw.githubusercontent.com/AlexanderThaller/asciidoc-editor/main/docs/screenshot.png)
+
 ## Using it in a page
 
 ```sh
