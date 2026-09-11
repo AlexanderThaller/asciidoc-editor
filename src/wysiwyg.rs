@@ -1090,23 +1090,43 @@ fn shift_lines_below(content: &Element, start: usize, added: usize, removed: usi
     }
 }
 
+/// What the editing surface calls back into.
+pub struct Hooks<R, T, F, E> {
+    /// Re-renders the document and, given a line, puts the caret at the start
+    /// of the block that came from it.
+    pub rerender: R,
+    /// Steps through the document's own history: forwards, or back.
+    pub travel: T,
+    /// Takes a picture that arrived by paste or drop.
+    pub on_file: F,
+    /// Whether the document is being edited rather than read, which is the
+    /// difference between rich text and source mode.
+    pub editable: E,
+}
+
 /// Wires up editing on the preview document.
 ///
 /// `rerender` re-renders the document and, given a line, puts the caret at the
 /// start of the block that came from it.
-pub fn attach<R, T, F>(
+pub fn attach<R, T, F, E>(
     document: &Document,
     content: Element,
     source: RwSignal<String>,
     editing: RwSignal<Option<Block>>,
-    rerender: R,
-    travel: T,
-    on_file: F,
+    hooks: Hooks<R, T, F, E>,
 ) where
     R: Fn(Option<usize>) + Clone + 'static,
     T: Fn(bool) + 'static,
     F: Fn(web_sys::File) + Clone + 'static,
+    E: Fn() -> bool + 'static,
 {
+    let Hooks {
+        rerender,
+        travel,
+        on_file,
+        editable,
+    } = hooks;
+
     let on_input = {
         let content = content.clone();
         move |ev: Event| {
@@ -1277,6 +1297,20 @@ pub fn attach<R, T, F>(
         on_file(file);
     };
 
+    // A click below the last block carries on writing at the end of the
+    // document. Taken on mousedown, before the browser has moved focus.
+    let on_mouse_down = {
+        let document = document.clone();
+        let content = content.clone();
+        move |ev: web_sys::MouseEvent| {
+            if ev.button() != 0 || !editable() {
+                return;
+            }
+            append_at_end(&document, &content, source, &ev);
+        }
+    };
+
+    listen(document, "mousedown", on_mouse_down);
     listen(document, "paste", on_paste);
     listen(document, "dragover", on_drag_over);
     listen(document, "drop", on_drop);
@@ -1768,21 +1802,91 @@ fn split_block<R>(
 
 /// Adds an empty paragraph that has no source behind it yet.
 fn start_pending_block(document: &Document, content: &Element, after: &Element, line: usize) {
-    let Ok(paragraph) = document.create_element("p") else {
+    let Some(paragraph) = pending_paragraph(document, line) else {
         return;
     };
+
+    // A rendered block sits inside a wrapper of its own — `<div
+    // class="paragraph">` — and the new paragraph belongs after that wrapper
+    // rather than inside it. A paragraph added at the end of the document has
+    // no wrapper yet, so climbing would step over the content altogether and
+    // leave the new block outside the document.
+    let wrapper = match after.parent_element() {
+        Some(parent) if !parent.is_same_node(Some(content)) => parent,
+        _ => after.clone(),
+    };
+    let container = wrapper.parent_element().unwrap_or_else(|| content.clone());
+    let _ = container.insert_before(&paragraph, wrapper.next_sibling().as_ref());
+
+    focus(document, &paragraph);
+}
+
+/// An empty paragraph with no source of its own.
+///
+/// It has a line but no end, which is what tells [`write_block`] to insert
+/// rather than replace when the first keystroke arrives.
+fn pending_paragraph(document: &Document, line: usize) -> Option<Element> {
+    let paragraph = document.create_element("p").ok()?;
 
     let _ = paragraph.set_attribute("contenteditable", "true");
     let _ = paragraph.set_attribute(LINE, &line.to_string());
     let _ = paragraph.set_attribute(LEVEL, "0");
     // An empty block has no height to click on or place a caret in.
-    let _ = paragraph.append_child(&document.create_element("br").unwrap().into());
+    let _ = paragraph.append_child(&document.create_element("br").ok()?.into());
 
-    let wrapper = after.parent_element().unwrap_or_else(|| after.clone());
-    let container = wrapper.parent_element().unwrap_or_else(|| content.clone());
-    let _ = container.insert_before(&paragraph, wrapper.next_sibling().as_ref());
+    Some(paragraph)
+}
 
+/// Starts a paragraph at the end of the document, for a click below the last
+/// block.
+///
+/// The last block would otherwise be the end of what can be written: a
+/// document ending in a table, an image or a quote has nowhere to put the
+/// caret after it, and Enter inside any of those means something else.
+fn append_at_end(
+    document: &Document,
+    content: &Element,
+    source: RwSignal<String>,
+    ev: &web_sys::MouseEvent,
+) -> Option<()> {
+    // A click on anything the document rendered is that block's business.
+    let target = ev.target()?.unchecked_into::<Node>();
+    if target.node_type() == Node::ELEMENT_NODE
+        && target
+            .unchecked_ref::<Element>()
+            .closest(&format!("[{LINE}]"))
+            .ok()
+            .flatten()
+            .is_some()
+    {
+        return None;
+    }
+
+    let last = content.last_element_child()?;
+    if f64::from(ev.client_y()) <= last.get_bounding_client_rect().bottom() {
+        return None;
+    }
+
+    // Taking the click stops the browser moving focus to the body, which would
+    // end the edit that is only just starting.
+    ev.prevent_default();
+
+    // An empty paragraph is already waiting there; use it rather than stacking
+    // another underneath.
+    if attr(&last, END).is_none()
+        && last.has_attribute("contenteditable")
+        && last.text_content().unwrap_or_default().trim().is_empty()
+    {
+        focus(document, &last);
+        return Some(());
+    }
+
+    let line = source.with_untracked(|src| source::end_line(src));
+    let paragraph = pending_paragraph(document, line)?;
+    content.append_child(&paragraph).ok()?;
     focus(document, &paragraph);
+
+    Some(())
 }
 
 /// Whether a link can be written into this kind of block.

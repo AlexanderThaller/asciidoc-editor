@@ -60,7 +60,14 @@ fn preview_shell() -> String {
 }
 
 const PREVIEW_STYLE: &str = r#"<style>
-body{margin:0;padding:1.25rem 1.5rem}
+/*
+ * The body fills the frame however short the document is, so there is always
+ * somewhere below the last block to click and carry on writing. The I-beam
+ * says so; inside the document the usual cursors apply again.
+ */
+html{height:100%}
+body{margin:0;padding:1.25rem 1.5rem;min-height:100%;box-sizing:border-box;cursor:text}
+#content{cursor:auto}
 /*
  * What can be edited, and what is being edited. An image is focusable without
  * being an editing host, so it gets none of the ring a browser draws around
@@ -1165,9 +1172,12 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
                                 content,
                                 source,
                                 editing,
-                                rerender,
-                                travel,
-                                embed_image,
+                                wysiwyg::Hooks {
+                                    rerender,
+                                    travel,
+                                    on_file: embed_image,
+                                    editable: move || mode.get_untracked() == Mode::Rich,
+                                },
                             );
                         }
 

@@ -488,6 +488,16 @@ pub fn replace(src: &str, range: LineRange, replacement: &str) -> String {
 ///
 /// Used when the rich-text surface creates a paragraph that has no source of
 /// its own yet.
+/// The line a block appended to the end of the document would occupy.
+///
+/// [`insert_block`] separates a new block from the one above it, so the answer
+/// is one line further down unless the document already ends blank.
+pub fn end_line(src: &str) -> usize {
+    let separated = src.lines().last().is_none_or(|last| last.trim().is_empty());
+
+    src.lines().count() + 1 + usize::from(!separated)
+}
+
 pub fn insert_block(src: &str, line: usize, text: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
     let mut inserted = false;
@@ -596,6 +606,28 @@ pub fn as_block(text: &str, level: Option<usize>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appending_past_the_end_lands_where_end_line_says() {
+        for src in ["", "= Title\n", "= Title\n\nWords.\n", "a\n\n", "____\n"] {
+            let line = end_line(src);
+            let grown = insert_block(src, line, "added");
+
+            assert_eq!(
+                grown.lines().nth(line - 1),
+                Some("added"),
+                "for {src:?}, end_line said {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn appending_keeps_a_blank_line_between_blocks() {
+        assert_eq!(
+            insert_block("____\n", end_line("____\n"), "added"),
+            "____\n\nadded\n"
+        );
+    }
 
     const DOC: &str = "= Title\n\nFirst para\nsecond line\n\n== Section\n\nTail\n";
 
