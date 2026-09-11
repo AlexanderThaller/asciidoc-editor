@@ -35,10 +35,14 @@
           default = pkgs.mkShell {
             packages = toolsFor pkgs ++ [ pkgs.trunk ];
 
+            # To stderr, always. Anything on stdout ends up inside a
+            # `$(nix develop --command ...)`, where it is read as output.
             shellHook = ''
-              echo "rustc      $(rustc --version | cut -d' ' -f2)"
-              echo "wasm-bindgen $(wasm-bindgen --version | cut -d' ' -f2)"
-              echo "wasm-opt   $(wasm-opt --version | cut -d' ' -f3)"
+              {
+                echo "rustc        $(rustc --version | cut -d' ' -f2)"
+                echo "wasm-bindgen $(wasm-bindgen --version | cut -d' ' -f2)"
+                echo "wasm-opt     $(wasm-opt --version | cut -d' ' -f3)"
+              } >&2
             '';
           };
         });

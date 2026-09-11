@@ -42,8 +42,9 @@ jobs:
       - name: Check the tag matches the version being published
         run: |
           tagged="${GITHUB_REF_NAME#v}"
-          packaged=$(nix develop --command node \
-            --print 'require("./pkg/package.json").version')
+          # Read directly rather than through the shell: nothing about this
+          # needs the toolchain, and a shell is a thing that can print.
+          packaged=$(jq -r .version pkg/package.json)
 
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$tagged" != "$packaged" ]; then
             echo "tag $GITHUB_REF_NAME does not match version $packaged" >&2
