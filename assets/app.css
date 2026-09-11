@@ -86,6 +86,52 @@ body {
 .button.icon code { font-size: 11px; }
 .button input[type="file"] { display: none; }
 
+/*
+ * The image panel hangs below the toolbars rather than sitting in the column,
+ * so opening it does not push the document down.
+ */
+.panel {
+  position: absolute;
+  z-index: 10;
+  top: 5.4rem;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.panel label.button {
+  flex-direction: row;
+  align-items: center;
+  font-size: inherit;
+  color: var(--fg);
+}
+
+.panel input[type="text"] {
+  min-width: 18rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #10151c;
+  color: var(--fg);
+  font: inherit;
+}
+.panel input[type="text"]:focus { outline: none; border-color: var(--accent); }
+.panel input[type="file"] { display: none; }
+
 /* ---- panes ---- */
 
 /* Context bar: what is focused, and what can be done to it. */

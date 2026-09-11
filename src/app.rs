@@ -6,9 +6,13 @@ use leptos::{html, prelude::*};
 use wasm_bindgen::{JsCast, prelude::Closure};
 use web_sys::{Element, Event, HtmlIFrameElement, HtmlInputElement, HtmlTextAreaElement, Node};
 
-use crate::{highlight, render, storage, sync, wysiwyg};
+use crate::{highlight, render, source, storage, sync, wysiwyg};
 
 const SAMPLE: &str = include_str!("../assets/sample.adoc");
+
+/// How large a file may be before embedding it stops being sensible. Base64
+/// adds about a third, and every keystroke copies the whole source.
+const MAX_EMBEDDED_BYTES: f64 = 2.0 * 1_048_576.0;
 
 /// Toolbar heading buttons. `=` is the document title in AsciiDoc, so the
 /// largest heading a body author writes is `==`.
@@ -80,6 +84,12 @@ pub fn App() -> impl IntoView {
     let textarea = NodeRef::<html::Textarea>::new();
     let overlay = NodeRef::<html::Pre>::new();
     let frame = NodeRef::<html::Iframe>::new();
+
+    // The image panel, and anything it has to say back.
+    let image_panel = RwSignal::new(false);
+    let image_url = RwSignal::new(String::new());
+    let image_alt = RwSignal::new(String::new());
+    let notice = RwSignal::new(None::<String>);
 
     // The block being edited in place, if any. While it is set the preview is
     // left alone: re-rendering under a live caret would destroy it.
@@ -183,6 +193,42 @@ pub fn App() -> impl IntoView {
         if let Some(document) = preview_document(frame) {
             wysiwyg::table_row(&document, source, add, &rerender);
         }
+    };
+
+    let insert_image = move |target: String, alt: String| {
+        if let Some(document) = preview_document(frame) {
+            let block = source::image_macro(&target, &alt);
+            wysiwyg::insert_block_below(&document, source, &block, &rerender);
+        }
+
+        image_panel.set(false);
+        image_url.set(String::new());
+        image_alt.set(String::new());
+        notice.set(None);
+    };
+
+    // Embedding copies the image into the document, so the source grows by
+    // about a third more than the file itself. Past a point that is no longer
+    // a document anyone wants to edit.
+    let embed_image = move |file: web_sys::File| {
+        if file.size() > MAX_EMBEDDED_BYTES {
+            notice.set(Some(format!(
+                "{} is {:.1} MB — too large to embed. Link to it instead.",
+                file.name(),
+                file.size() / 1_048_576.0
+            )));
+            return;
+        }
+
+        let alt = match image_alt.get_untracked().trim() {
+            "" => file
+                .name()
+                .rsplit_once('.')
+                .map_or(file.name(), |(stem, _)| stem.to_string()),
+            given => given.to_string(),
+        };
+
+        storage::read_data_url(&file, move |data| insert_image(data, alt.clone()));
     };
 
     let apply_column = move |add: bool| {
@@ -415,6 +461,19 @@ pub fn App() -> impl IntoView {
                 </div>
             </Show>
 
+            <span class="separator"></span>
+            <button
+                class="button icon"
+                title="Insert an image"
+                class:active=move || image_panel.get()
+                on:click=move |_| {
+                    notice.set(None);
+                    image_panel.update(|open| *open = !*open);
+                }
+            >
+                "🖼"
+            </button>
+
             <div class="spacer"></div>
             <label class="button">
                 "Open"
@@ -601,6 +660,63 @@ pub fn App() -> impl IntoView {
         </Show>
 
 
+        <Show when=move || image_panel.get()>
+            <div class="panel">
+                <label>
+                    "Image URL or path"
+                    <input
+                        type="text"
+                        placeholder="images/diagram.png"
+                        prop:value=image_url
+                        on:input=move |ev| image_url.set(event_target_value(&ev))
+                    />
+                </label>
+                <label>
+                    "Description"
+                    <input
+                        type="text"
+                        placeholder="What the image shows"
+                        prop:value=image_alt
+                        on:input=move |ev| image_alt.set(event_target_value(&ev))
+                    />
+                </label>
+
+                <button
+                    class="button"
+                    disabled=move || image_url.get().trim().is_empty()
+                    on:click=move |_| insert_image(image_url.get_untracked(), image_alt.get_untracked())
+                >
+                    "Link to it"
+                </button>
+
+                <span class="separator"></span>
+                <label class="button" title="Copy the image into the document itself">
+                    "Embed a file…"
+                    <input
+                        type="file"
+                        accept="image/*"
+                        on:change=move |ev| {
+                            let input: HtmlInputElement = event_target(&ev);
+                            if let Some(file) = input.files().and_then(|files| files.get(0)) {
+                                embed_image(file);
+                            }
+                        }
+                    />
+                </label>
+
+                <div class="spacer"></div>
+                <button
+                    class="button"
+                    on:click=move |_| {
+                        notice.set(None);
+                        image_panel.set(false);
+                    }
+                >
+                    "Close"
+                </button>
+            </div>
+        </Show>
+
         <main class="panes" class:rich=move || mode.get() == Mode::Rich>
             <section class="editor">
                 <pre class="overlay" node_ref=overlay inner_html=move || highlight::highlight(&source.get())></pre>
@@ -645,6 +761,10 @@ pub fn App() -> impl IntoView {
 
         <footer class="status">
             {move || {
+                if let Some(said) = notice.get() {
+                    return view! { <span class="warn">{said}</span> }.into_any();
+                }
+
                 let warnings = warnings.get();
                 if warnings.is_empty() {
                     view! { <span class="ok">"No warnings"</span> }.into_any()

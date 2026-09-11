@@ -569,6 +569,25 @@ where
     rerender(Some(first));
 }
 
+/// Adds a block of its own below the block the caret is in, or at the end of
+/// the document when nothing is focused.
+pub fn insert_block_below<R>(
+    document: &Document,
+    source: RwSignal<String>,
+    text: &str,
+    rerender: &R,
+) where
+    R: Fn(Option<usize>),
+{
+    let below = focused(document)
+        .and_then(|block| attr(&block, END).or_else(|| attr(&block, LINE)))
+        // Past the block and the blank line that closes it.
+        .map_or(usize::MAX, |end| end + 2);
+
+    source.set(source::insert_block(&source.get_untracked(), below, text));
+    rerender(None);
+}
+
 /// Removes the focused cell's table outright.
 pub fn remove_table<R>(document: &Document, source: RwSignal<String>, rerender: &R)
 where

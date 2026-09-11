@@ -55,6 +55,18 @@ fn is_attached(line: &str) -> bool {
     is_block_title(line) || (line.starts_with('[') && line.trim_end().ends_with(']'))
 }
 
+/// Writes an image block for `target`, described by `alt`.
+///
+/// The target may be a path, a URL, or a `data:` URL holding the image itself.
+pub fn image_macro(target: &str, alt: &str) -> String {
+    // A closing bracket would end the macro's attribute list early.
+    format!(
+        "image::{}[{}]",
+        target.trim(),
+        alt.replace(']', "\\]").trim()
+    )
+}
+
 /// Inserts `text` as a line of its own before `line`.
 pub fn insert_line(src: &str, line: usize, text: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
@@ -344,6 +356,12 @@ pub fn insert_block(src: &str, line: usize, text: &str) -> String {
 
     for (index, existing) in src.lines().enumerate() {
         if index + 1 == line {
+            // A block needs a blank line above it as much as below; the line
+            // before may be a delimiter that closed the previous one.
+            if out.last().is_some_and(|last| !last.trim().is_empty()) {
+                out.push("");
+            }
+
             out.extend(text.split('\n'));
             out.push("");
             inserted = true;
@@ -505,6 +523,23 @@ mod tests {
             edited,
             "= Title\n\nFirst para\nsecond line\n\nNew para\n\n== Section\n\nTail\n"
         );
+    }
+
+    #[test]
+    fn separates_an_inserted_block_from_the_one_above() {
+        let closed = "= T\n\n|===\n| a\n|===\nAfter\n";
+
+        assert_eq!(
+            insert_block(closed, 6, "image::x.png[]"),
+            "= T\n\n|===\n| a\n|===\n\nimage::x.png[]\n\nAfter\n"
+        );
+    }
+
+    #[test]
+    fn writes_image_macros() {
+        assert_eq!(image_macro("x.png", "A dot"), "image::x.png[A dot]");
+        assert_eq!(image_macro(" x.png ", ""), "image::x.png[]");
+        assert_eq!(image_macro("x.png", "a ] b"), "image::x.png[a \\] b]");
     }
 
     #[test]

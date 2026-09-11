@@ -47,11 +47,24 @@ pub fn download(file_name: &str, mime: &str, content: &str) -> Option<()> {
 
 /// Reads a picked `.adoc` file, handing the text to `on_load`.
 pub fn read_file(file: &File, on_load: impl Fn(String) + 'static) -> Option<()> {
+    read(file, on_load, FileReader::read_as_text)
+}
+
+/// Reads a picked file as a `data:` URL, for embedding it in the document.
+pub fn read_data_url(file: &File, on_load: impl Fn(String) + 'static) -> Option<()> {
+    read(file, on_load, FileReader::read_as_data_url)
+}
+
+fn read(
+    file: &File,
+    on_load: impl Fn(String) + 'static,
+    start: fn(&FileReader, &Blob) -> Result<(), wasm_bindgen::JsValue>,
+) -> Option<()> {
     let reader = FileReader::new().ok()?;
     let handle = reader.clone();
 
     let onload = Closure::<dyn FnMut()>::new(move || {
-        if let Some(text) = handle.result().ok().and_then(|v| v.as_string()) {
+        if let Some(text) = handle.result().ok().and_then(|value| value.as_string()) {
             on_load(text);
         }
     });
@@ -59,5 +72,5 @@ pub fn read_file(file: &File, on_load: impl Fn(String) + 'static) -> Option<()> 
     // The closure must outlive this call; the reader fires it exactly once.
     onload.forget();
 
-    reader.read_as_text(file).ok()
+    start(&reader, file).ok()
 }
