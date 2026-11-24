@@ -13,20 +13,28 @@
 //! ```
 //!
 //! Everything the editor needs travels with it: the stylesheets are built into
-//! the wasm, so there is nothing for the page to serve alongside.
+//! the wasm, so there is nothing for the page to serve alongside. They go onto
+//! the page as constructed stylesheets rather than `<style>` elements, which a
+//! strict Content-Security-Policy has nothing to say about.
 
 mod app;
 mod highlight;
 mod inline;
+mod line_ends;
 mod list;
 mod render;
 mod source;
 mod storage;
+mod style;
 mod sync;
 mod table;
 mod wysiwyg;
 
-use std::{any::Any, cell::RefCell, rc::Rc};
+use std::{
+    any::Any,
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, prelude::*};
@@ -56,6 +64,17 @@ export interface MountOptions {
     autosave?: string;
     /** Start in rich text rather than source. Defaults to `true`. */
     richText?: boolean;
+    /**
+     * Takes a file that was pasted, dropped or picked, and answers with the
+     * AsciiDoc to put in the document for it, such as `image::a.png[]`.
+     * Without it, images are embedded in the document as `data:` URIs.
+     */
+    onFile?: FileCallback;
+    /**
+     * What relative image and link targets in the rendering resolve against,
+     * such as `/files/`. Defaults to the page's own address.
+     */
+    baseUrl?: string;
 }
 
 /** The element to mount into, or a selector naming it. */
@@ -63,6 +82,15 @@ export type MountTarget = Element | string;
 
 /** Called with the document, as AsciiDoc, whenever it changes. */
 export type ChangeCallback = (document: string) => void;
+
+/**
+ * Given a file the user pasted, dropped or picked, says what goes in the
+ * document for it: AsciiDoc, put in as a block of its own. Nothing, or an
+ * empty string, puts nothing in; a rejection is shown to the user.
+ */
+export type FileCallback = (
+    file: File,
+) => string | null | undefined | Promise<string | null | undefined>;
 "#;
 
 #[wasm_bindgen]
@@ -84,6 +112,9 @@ extern "C" {
 #[wasm_bindgen]
 pub struct Editor {
     source: RwSignal<String>,
+    /// Whether the document came with CRLF line ends. The editor works on LF
+    /// and hands them back.
+    crlf: Rc<Cell<bool>>,
     /// Kept so that unmounting can happen on demand rather than never.
     mounted: Option<Box<dyn Any>>,
     /// Kept so that destroying gives the element back as it was found.
@@ -94,23 +125,25 @@ pub struct Editor {
 impl Editor {
     /// The document, as AsciiDoc.
     pub fn value(&self) -> String {
-        self.source.get_untracked()
+        line_ends::restore(self.source.get_untracked(), self.crlf.get())
     }
 
     /// Replaces the document.
     #[wasm_bindgen(js_name = setValue)]
     pub fn set_value(&self, source: String) {
-        self.source.set(source);
+        self.crlf.set(line_ends::is_crlf(&source));
+        self.source.set(line_ends::to_lf(source));
     }
 
     /// Calls `callback` with the document whenever it changes.
     #[wasm_bindgen(js_name = onChange)]
     pub fn on_change(&self, callback: ChangeCallback) {
         let source = self.source;
+        let crlf = Rc::clone(&self.crlf);
         let callback: js_sys::Function = callback.unchecked_into();
 
         Effect::new(move |_| {
-            let document = source.get();
+            let document = line_ends::restore(source.get(), crlf.get());
             let _ = callback.call1(&JsValue::NULL, &JsValue::from_str(&document));
         });
     }
@@ -126,8 +159,10 @@ impl Editor {
 /// element itself.
 ///
 /// Options, all of them optional: `value` to open with, `autosave` naming a
-/// `localStorage` key to keep the document under, and `richText` to start in
-/// rich text rather than source (the default).
+/// `localStorage` key to keep the document under, `richText` to start in
+/// rich text rather than source (the default), `onFile` to be handed pasted,
+/// dropped and picked files rather than embedding them, and `baseUrl` for
+/// relative targets in the rendering to resolve against.
 #[wasm_bindgen]
 pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Editor, JsValue> {
     console_error_panic_hook::set_once();
@@ -140,6 +175,16 @@ pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Edit
         .or_else(|| autosave.as_deref().and_then(storage::load))
         .unwrap_or_else(|| SAMPLE.to_string());
     let rich = bool_option(&options, "richText").unwrap_or(true);
+    let on_file = function_option(&options, "onFile");
+    let base = string_option(&options, "baseUrl")
+        .map(|base| absolute(&host, &base))
+        .transpose()?;
+
+    // Every edit splices lines back together with LF. A document written with
+    // CRLF would come back with every line changed, so it is edited as LF and
+    // handed back the way it came.
+    let crlf = Rc::new(Cell::new(line_ends::is_crlf(&value)));
+    let value = line_ends::to_lf(value);
 
     add_style(&host)?;
     // Added rather than assigned: the page may well have dressed the element
@@ -156,7 +201,15 @@ pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Edit
         let source = RwSignal::new(value.clone());
         *taken.borrow_mut() = Some(source);
 
-        view! { <app::App source=source autosave=autosave.clone() rich=rich /> }
+        view! {
+            <app::App
+                source=source
+                autosave=autosave.clone()
+                rich=rich
+                on_file=on_file.clone()
+                base=base.clone()
+            />
+        }
     });
 
     let source = carried
@@ -166,6 +219,7 @@ pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Edit
 
     Ok(Editor {
         source,
+        crlf,
         mounted: Some(Box::new(mounted)),
         host,
     })
@@ -198,20 +252,20 @@ fn add_style(host: &HtmlElement) -> Result<(), JsValue> {
         .owner_document()
         .ok_or_else(|| JsValue::from_str("the mount target is not on a page"))?;
 
-    if document.get_element_by_id(STYLE_ID).is_some() {
-        return Ok(());
-    }
+    style::adopt(&document, STYLE, STYLE_ID)
+}
 
-    let style = document.create_element("style")?;
-    style.set_id(STYLE_ID);
-    style.set_text_content(Some(STYLE));
+/// `base` made absolute against the page. The preview's own address is
+/// `about:srcdoc`, which a relative base could not be resolved against.
+fn absolute(host: &HtmlElement, base: &str) -> Result<String, JsValue> {
+    let page = host
+        .owner_document()
+        .and_then(|document| document.base_uri().ok().flatten())
+        .ok_or_else(|| JsValue::from_str("the mount target is not on a page"))?;
 
-    document
-        .head()
-        .ok_or_else(|| JsValue::from_str("the page has no head"))?
-        .append_child(&style)?;
-
-    Ok(())
+    web_sys::Url::new_with_base(base, &page)
+        .map(|url| url.href())
+        .map_err(|_| JsValue::from_str(&format!("baseUrl {base} is not a URL")))
 }
 
 fn string_option(options: &JsValue, name: &str) -> Option<String> {
@@ -225,4 +279,11 @@ fn bool_option(options: &JsValue, name: &str) -> Option<bool> {
     js_sys::Reflect::get(options, &JsValue::from_str(name))
         .ok()?
         .as_bool()
+}
+
+fn function_option(options: &JsValue, name: &str) -> Option<js_sys::Function> {
+    js_sys::Reflect::get(options, &JsValue::from_str(name))
+        .ok()
+        .filter(JsValue::is_function)
+        .map(JsCast::unchecked_into)
 }

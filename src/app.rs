@@ -3,10 +3,11 @@
 use std::time::Duration;
 
 use leptos::{html, prelude::*};
-use wasm_bindgen::{JsCast, prelude::Closure};
+use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
+use wasm_bindgen_futures::JsFuture;
 use web_sys::{Element, Event, HtmlIFrameElement, HtmlInputElement, HtmlTextAreaElement, Node};
 
-use crate::{highlight, render, source, storage, sync, wysiwyg};
+use crate::{highlight, render, source, storage, style, sync, wysiwyg};
 
 /// A document as it stood, and where the caret was at the time.
 #[derive(Clone, Debug)]
@@ -49,14 +50,40 @@ const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 
 /// The preview iframe is built once and then mutated in place. Re-assigning
 /// `srcdoc` would reload it and throw away the scroll position on every render.
-fn preview_shell() -> String {
+///
+/// It carries no styling of its own: that is adopted once it has loaded (see
+/// [`style`]), because a `<style>` in it would be refused by any page whose
+/// Content-Security-Policy does not allow inline styles — and the iframe
+/// inherits the page's policy. Given a base, relative targets in the document
+/// resolve against it rather than against the page.
+fn preview_shell(base: Option<&str>) -> String {
+    let base = base.map_or_else(String::new, |base| {
+        format!("<base href=\"{}\">", escape_attribute(base))
+    });
+
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><style>{}</style>{PREVIEW_STYLE}</head><body class=\"article\"><div id=\"content\"></div></body></html>",
-        render::stylesheet()
+        "<!doctype html><html><head><meta charset=\"utf-8\">{base}</head><body class=\"article\"><div id=\"content\"></div></body></html>"
     )
 }
 
-const PREVIEW_STYLE: &str = r#"<style>
+/// `text` made safe to put between the double quotes of an attribute.
+fn escape_attribute(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// What the preview is styled with: Asciidoctor's stylesheet, then the
+/// editor's own additions over it.
+fn preview_style() -> String {
+    format!("{}\n{PREVIEW_STYLE}", render::stylesheet())
+}
+
+/// Marks a preview document as styled already.
+const PREVIEW_STYLE_ID: &str = "asciidoc-editor-preview-style";
+
+const PREVIEW_STYLE: &str = r#"
 /*
  * The body fills the frame however short the document is, so there is always
  * somewhere below the last block to click and carry on writing. The I-beam
@@ -92,7 +119,7 @@ body{margin:0;padding:1.25rem 1.5rem;min-height:100%;box-sizing:border-box;curso
 /* Where a new block would be added, while the panel asking for one is open. */
 [data-edit-insert-after]{position:relative}
 [data-edit-insert-after]::after{content:"";position:absolute;left:0;right:0;bottom:-.55rem;height:2px;border-radius:2px;background:#7fb4ff}
-</style>"#;
+"#;
 
 /// Which surface the document is edited through.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -107,9 +134,21 @@ pub enum Mode {
 ///
 /// `autosave` names a `localStorage` key to keep the document under; without
 /// one nothing is written, which is what an embedding page usually wants.
+/// `on_file`, when the page gave one, is handed every file that arrives and
+/// answers with what to put in the document for it; `base` is what relative
+/// targets in the preview resolve against.
 #[component]
-pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> impl IntoView {
+pub fn App(
+    source: RwSignal<String>,
+    autosave: Option<String>,
+    rich: bool,
+    on_file: Option<js_sys::Function>,
+    base: Option<String>,
+) -> impl IntoView {
     let mode = RwSignal::new(if rich { Mode::Rich } else { Mode::Source });
+    // Whether files go to the page rather than into the document.
+    let hands_off_files = on_file.is_some();
+    let on_file = StoredValue::new_local(on_file);
     // Trails `source` by the debounce interval; drives the expensive render.
     let settled = RwSignal::new(source.get_untracked());
     let warnings = RwSignal::new(Vec::<render::Warning>::new());
@@ -376,6 +415,89 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
         };
 
         storage::read_data_url(&file, move |data| insert_image(data, alt.clone()));
+    };
+
+    // Hands files to the page, one at a time and in order, and puts in what
+    // it answers: below the block ending at `after` (the end of the document
+    // without one), or over the image being changed. Each block goes below
+    // the one before it, so several files land in the order they came.
+    let hand_over = move |files: Vec<web_sys::File>,
+                          after: Option<usize>,
+                          replacing: Option<(wysiwyg::Block, String)>| {
+        let Some(callback) = on_file.get_value() else {
+            return;
+        };
+
+        leptos::task::spawn_local(async move {
+            let mut after = after;
+            let mut replacing = replacing;
+
+            for file in files {
+                let name = file.name();
+                notice.set(Some(format!("Adding {name}…")));
+                let before = source.get_untracked();
+
+                let text = match ask_page(&callback, &file).await {
+                    Ok(Some(text)) => text,
+                    Ok(None) => continue,
+                    Err(why) => {
+                        notice.set(Some(format!("{name} was not added: {why}")));
+                        return;
+                    }
+                };
+
+                // Typed over while the page was busy: the line numbers taken
+                // when the file arrived may now point into the middle of a
+                // block, and the end of the document is the one place still
+                // known to lie between two.
+                if source.get_untracked() != before {
+                    after = None;
+                    replacing = None;
+                }
+
+                match (replacing.take(), source::image_target(&text)) {
+                    (Some((block, alt)), Some(target)) => {
+                        wysiwyg::update_image(source, block, target, &alt, &rerender);
+                    }
+                    _ => {
+                        wysiwyg::insert_block_below(source, after, &text, &rerender);
+                        after = after.map(|end| source::end_after_inserting(end, &text));
+                    }
+                }
+            }
+
+            notice.set(None);
+        });
+    };
+
+    // A file from the image panel: the page's to place if it asked for
+    // files, embedded otherwise.
+    let pick_file = move |file: web_sys::File| {
+        if !hands_off_files {
+            embed_image(file);
+            return;
+        }
+
+        let replacing = editing_image
+            .get_untracked()
+            .map(|block| (block, image_alt.get_untracked()));
+        let after = insert_after.get_untracked().map(|block| block.end);
+
+        editing_image.set(None);
+        image_panel.set(false);
+        image_url.set(String::new());
+        image_alt.set(String::new());
+        hand_over(vec![file], after, replacing);
+    };
+
+    // Files pasted or dropped into the document: below the block being
+    // edited when the page takes them, embedded as before when it does not.
+    let take_files = move |files: Vec<web_sys::File>| {
+        if hands_off_files {
+            hand_over(files, editing.get_untracked().map(|block| block.end), None);
+        } else if let Some(file) = files.into_iter().next() {
+            embed_image(file);
+        }
     };
 
     // Clicking the wrapper a block already has takes it off again.
@@ -1103,15 +1225,22 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
                 </button>
 
                 <span class="separator"></span>
-                <label class="button" title="Copy the image into the document itself">
-                    "Embed a file…"
+                <label
+                    class="button"
+                    title=if hands_off_files {
+                        "Add an image file"
+                    } else {
+                        "Copy the image into the document itself"
+                    }
+                >
+                    {if hands_off_files { "Upload a file…" } else { "Embed a file…" }}
                     <input
                         type="file"
                         accept="image/*"
                         on:change=move |ev| {
                             let input: HtmlInputElement = event_target(&ev);
                             if let Some(file) = input.files().and_then(|files| files.get(0)) {
-                                embed_image(file);
+                                pick_file(file);
                             }
                         }
                     />
@@ -1157,13 +1286,19 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
             <div class="preview">
                 <iframe
                     node_ref=frame
-                    srcdoc=preview_shell()
+                    srcdoc=preview_shell(base.as_deref())
                     on:load=move |_| {
                         attach_click_to_locate(frame, textarea, source, mode);
 
                         if let (Some(document), Some(content)) =
                             (preview_document(frame), preview_content(frame))
                         {
+                            if let Err(error) =
+                                style::adopt(&document, &preview_style(), PREVIEW_STYLE_ID)
+                            {
+                                web_sys::console::error_1(&error);
+                            }
+
                             wysiwyg::attach(
                                 &document,
                                 content,
@@ -1172,7 +1307,8 @@ pub fn App(source: RwSignal<String>, autosave: Option<String>, rich: bool) -> im
                                 wysiwyg::Hooks {
                                     rerender,
                                     travel,
-                                    on_file: embed_image,
+                                    on_files: take_files,
+                                    any_file: hands_off_files,
                                     editable: move || mode.get_untracked() == Mode::Rich,
                                 },
                             );
@@ -1222,6 +1358,42 @@ fn describe(kind: wysiwyg::Kind) -> String {
         wysiwyg::Kind::Verbatim => "Code block".to_string(),
         wysiwyg::Kind::Attribution(style) => format!("{style} attribution"),
     }
+}
+
+/// Asks the page what to put in the document for `file`.
+///
+/// The page may answer at once or with a promise; nothing, or nothing but
+/// whitespace, means nothing goes in. A throw or a rejection comes back as
+/// what it said, to be shown.
+async fn ask_page(
+    callback: &js_sys::Function,
+    file: &web_sys::File,
+) -> Result<Option<String>, String> {
+    let answer = callback
+        .call1(&JsValue::NULL, file)
+        .map_err(|error| reason(&error))?;
+    let settled = JsFuture::from(js_sys::Promise::resolve(&answer))
+        .await
+        .map_err(|error| reason(&error))?;
+
+    Ok(settled
+        .as_string()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty()))
+}
+
+/// What a thrown value says: its `message` if it is an error, itself if it is
+/// a string.
+fn reason(error: &JsValue) -> String {
+    error
+        .as_string()
+        .or_else(|| {
+            js_sys::Reflect::get(error, &JsValue::from_str("message"))
+                .ok()
+                .and_then(|message| message.as_string())
+        })
+        .filter(|message| !message.trim().is_empty())
+        .unwrap_or_else(|| "the page refused it".to_string())
 }
 
 /// Puts the caret in the block rendered from `line`.
@@ -1352,4 +1524,56 @@ fn scroll_caret_into_view(ta: &HtmlTextAreaElement, source: RwSignal<String>, li
         - f64::from(ta.client_height()) / 2.0;
 
     ta.set_scroll_top(target.max(0.0) as i32);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_preview_carries_no_inline_style() {
+        // A policy without 'unsafe-inline' would refuse it, and the preview
+        // inherits the page's policy.
+        assert!(!preview_shell(None).contains("<style"));
+        assert!(!preview_shell(Some("https://example.com/")).contains("<style"));
+    }
+
+    #[test]
+    fn the_preview_style_is_plain_css() {
+        let css = preview_style();
+
+        assert!(css.starts_with("/*! Asciidoctor default stylesheet"));
+        assert!(css.contains("[data-edit-line]"), "the editor's own rules");
+        assert!(!css.contains("<style"), "markup in a stylesheet");
+    }
+
+    #[test]
+    fn without_a_base_the_preview_has_none() {
+        assert!(!preview_shell(None).contains("<base"));
+    }
+
+    #[test]
+    fn a_base_is_put_in_the_preview_head() {
+        let shell = preview_shell(Some("https://notes.example/web/f/"));
+
+        assert!(
+            shell.contains(
+                "<head><meta charset=\"utf-8\"><base href=\"https://notes.example/web/f/\"></head>"
+            ),
+            "{shell}"
+        );
+    }
+
+    #[test]
+    fn a_base_cannot_break_out_of_its_attribute() {
+        let shell = preview_shell(Some("https://x.example/\"><script>alert(1)</script>?a&b"));
+
+        assert!(!shell.contains("<script"), "{shell}");
+        assert!(
+            shell.contains(
+                "href=\"https://x.example/&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;?a&amp;b\""
+            ),
+            "{shell}"
+        );
+    }
 }

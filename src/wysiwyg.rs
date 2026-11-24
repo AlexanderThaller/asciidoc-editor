@@ -1097,8 +1097,11 @@ pub struct Hooks<R, T, F, E> {
     pub rerender: R,
     /// Steps through the document's own history: forwards, or back.
     pub travel: T,
-    /// Takes a picture that arrived by paste or drop.
-    pub on_file: F,
+    /// Takes the files that arrived by paste or drop.
+    pub on_files: F,
+    /// Whether any file is taken. Otherwise only the first picture is, which
+    /// is all that embedding in the document can sensibly hold.
+    pub any_file: bool,
     /// Whether the document is being edited rather than read, which is the
     /// difference between rich text and source mode.
     pub editable: E,
@@ -1117,13 +1120,14 @@ pub fn attach<R, T, F, E>(
 ) where
     R: Fn(Option<usize>) + Clone + 'static,
     T: Fn(bool) + 'static,
-    F: Fn(web_sys::File) + Clone + 'static,
+    F: Fn(Vec<web_sys::File>) + Clone + 'static,
     E: Fn() -> bool + 'static,
 {
     let Hooks {
         rerender,
         travel,
-        on_file,
+        on_files,
+        any_file,
         editable,
     } = hooks;
 
@@ -1262,15 +1266,16 @@ pub fn attach<R, T, F, E>(
     // flattened at the next render.
     let on_paste = {
         let document = document.clone();
-        let on_file = on_file.clone();
+        let on_files = on_files.clone();
         move |ev: web_sys::ClipboardEvent| {
             let Some(data) = ev.clipboard_data() else {
                 return;
             };
 
-            if let Some(file) = first_image(&data) {
+            let files = files_of(&data, any_file);
+            if !files.is_empty() {
                 ev.prevent_default();
-                on_file(file);
+                on_files(files);
                 return;
             }
 
@@ -1289,12 +1294,16 @@ pub fn attach<R, T, F, E>(
     // The browser would otherwise open the file in place of the document.
     let on_drag_over = |ev: web_sys::DragEvent| ev.prevent_default();
     let on_drop = move |ev: web_sys::DragEvent| {
-        let Some(file) = ev.data_transfer().and_then(|data| first_image(&data)) else {
+        let files = ev
+            .data_transfer()
+            .map(|data| files_of(&data, any_file))
+            .unwrap_or_default();
+        if files.is_empty() {
             return;
-        };
+        }
 
         ev.prevent_default();
-        on_file(file);
+        on_files(files);
     };
 
     // A click below the last block carries on writing at the end of the
@@ -2104,13 +2113,22 @@ fn editable_target(ev: &Event) -> Option<Element> {
         .ok()?
 }
 
-/// The first image among what was pasted or dropped.
-fn first_image(data: &web_sys::DataTransfer) -> Option<web_sys::File> {
-    let files = data.files()?;
+/// The files among what was pasted or dropped: all of them, in order, or
+/// only the first image.
+fn files_of(data: &web_sys::DataTransfer, any_file: bool) -> Vec<web_sys::File> {
+    let Some(files) = data.files() else {
+        return Vec::new();
+    };
+    let files = (0..files.length()).filter_map(|index| files.get(index));
 
-    (0..files.length())
-        .filter_map(|index| files.get(index))
-        .find(|file| file.type_().starts_with("image/"))
+    if any_file {
+        files.collect()
+    } else {
+        files
+            .filter(|file| file.type_().starts_with("image/"))
+            .take(1)
+            .collect()
+    }
 }
 
 fn listen<E, F>(document: &Document, event: &str, handler: F)

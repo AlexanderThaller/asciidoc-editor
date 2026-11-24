@@ -70,9 +70,82 @@ whatever classes the page put on it.
 | `value` | the sample document | the document to open with |
 | `autosave` | none | a `localStorage` key to keep the document under |
 | `richText` | `true` | start in rich text rather than source |
+| `onFile` | none | takes pasted, dropped and picked files; answers with the AsciiDoc to put in for each (`FileCallback`) |
+| `baseUrl` | the page's address | what relative image and link targets in the rendering resolve against |
 
 With `autosave` set and no `value`, the editor opens whatever was last saved
 under that key.
+
+A document written with CRLF line ends comes back with them: the editor works
+on LF, and `value()` and `onChange` hand the CRLF back, so editing one block
+does not change every line.
+
+#### Files
+
+Without `onFile`, a picture that is pasted, dropped or picked in the image
+panel is embedded in the document as a `data:` URI, up to 2 MB. With it, every
+file goes to the page instead — all of the files of a paste or drop, one call
+each, in order — and whatever the page answers goes in as a block of its own,
+below the block being edited:
+
+```js
+mount("#editor", {
+  value,
+  baseUrl: "/files/",
+  onFile: async (file) => {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetch("/upload", { method: "POST", body });
+    if (!response.ok) throw new Error(await response.text());
+    const { path } = await response.json();
+    return file.type.startsWith("image/")
+      ? `image::${path}[${file.name}]`
+      : `link:${path}[${file.name}]`;
+  },
+});
+```
+
+The answer may be a string or a promise of one. Nothing, or an empty string,
+puts nothing in; a throw or a rejection puts nothing in either, and its message
+is shown in the status bar. Picked from the panel while it is changing an
+image, an answer of `image::target[...]` points that image at the new target.
+
+#### Relative targets
+
+The rendering lives in an iframe whose address is `about:srcdoc`, so a
+relative target such as `image::assets/a.png[]` resolves against the page.
+`baseUrl` — absolute, or relative to the page — gives the iframe a `<base>`
+instead: with `baseUrl: "/files/"` that image loads from `/files/assets/a.png`.
+The document itself is not changed.
+
+### Content Security Policy
+
+The editor runs under a strict policy. It has no inline scripts or event
+handlers, and its stylesheets are constructed (`new CSSStyleSheet()`, adopted
+by the page and by the preview iframe), which `style-src` does not cover — so
+no `'unsafe-inline'`, hash or nonce is needed for them. What it does need:
+
+| Directive | Needs | For |
+|---|---|---|
+| `script-src` | `'self' 'wasm-unsafe-eval'` | the module, and compiling its wasm |
+| `connect-src` | `'self'` | fetching the wasm (`init()` does it with `fetch`) |
+| `style-src` | nothing more than `'self'`, or even `'none'` | |
+| `img-src` | `'self'`; `data:` for embedded images | images in the document |
+| `base-uri` | `'self'` | only with `baseUrl` (the iframe's `<base>`) |
+
+For example, with the package and the images on the page's own origin:
+
+```
+default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self';
+style-src 'self'; img-src 'self' data:; base-uri 'self'
+```
+
+The preview iframe is `srcdoc`, so it inherits the page's policy and needs no
+`frame-src`; `frame-ancestors 'none'` and `X-Frame-Options: DENY` do not stop
+it. Two things a strict `style-src` still takes away: `style="…"` attributes in
+the rendering (column widths of a table with `cols`, for one), and the
+fallback for browsers without constructed stylesheets (Safari before 16.4),
+where the editor puts `<style>` elements on the page instead.
 
 ### The handle
 
