@@ -115,6 +115,24 @@ pub fn image_macro(target: &str, alt: &str) -> String {
     )
 }
 
+/// What a lone image block points at: `assets/a.png` for
+/// `image::assets/a.png[A picture]`. Anything else — an inline image, a link,
+/// more than one line — has no single target to take.
+pub fn image_target(text: &str) -> Option<&str> {
+    let rest = text.trim().strip_prefix("image::")?;
+    let (target, attributes) = rest.split_once('[')?;
+
+    let single = !rest.contains('\n') && attributes.ends_with(']');
+    let target = target.trim();
+    (single && !target.is_empty()).then_some(target)
+}
+
+/// The last line of a block of `text` put in below the block ending at
+/// `end`, by [`insert_block`] past the blank line that closes that block.
+pub fn end_after_inserting(end: usize, text: &str) -> usize {
+    end + 1 + text.split('\n').count()
+}
+
 /// Schemes AsciiDoc turns into links on sight; anything else needs the macro
 /// spelled out.
 const LINKED_SCHEMES: [&str; 6] = [
@@ -619,6 +637,46 @@ mod tests {
                 "for {src:?}, end_line said {line}"
             );
         }
+    }
+
+    #[test]
+    fn an_image_block_names_its_target() {
+        assert_eq!(
+            image_target("image::assets/01J/a b.png[A picture]"),
+            Some("assets/01J/a b.png")
+        );
+        assert_eq!(image_target("  image::x.png[]\n"), Some("x.png"));
+    }
+
+    #[test]
+    fn anything_but_a_lone_image_block_has_no_target() {
+        assert_eq!(image_target("link:assets/01J/a.pdf[a.pdf]"), None);
+        assert_eq!(image_target("image:x.png[inline]"), None);
+        assert_eq!(image_target("image::[]"), None);
+        assert_eq!(image_target("image::x.png"), None);
+        assert_eq!(image_target("image::a.png[]\n\nimage::b.png[]"), None);
+    }
+
+    #[test]
+    fn blocks_put_in_one_below_another_stay_in_order() {
+        // What a page answering several dropped files gets: each block goes
+        // below the one before it.
+        let mut src = "= Title\n\nFirst.\n\nLast.\n".to_string();
+        let mut end = 3;
+
+        for text in [
+            "image::a.png[]",
+            "link:b.pdf[b.pdf]\nsecond line",
+            "image::c.png[]",
+        ] {
+            src = insert_block(&src, end + 2, text);
+            end = end_after_inserting(end, text);
+        }
+
+        assert_eq!(
+            src,
+            "= Title\n\nFirst.\n\nimage::a.png[]\n\nlink:b.pdf[b.pdf]\nsecond line\n\nimage::c.png[]\n\nLast.\n"
+        );
     }
 
     #[test]

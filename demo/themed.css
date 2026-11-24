@@ -1,0 +1,85 @@
+/* The page's own look, which the editor is told to match. */
+:root {
+  color-scheme: light dark;
+  --paper: #fbf6f3;
+  --card: #ffffff;
+  --ink: #1e191b;
+  --muted: #6e5c60;
+  --line: #ecdcd4;
+  --accent: #a9434b;
+  --accent-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1e191b;
+    --card: #272022;
+    --ink: #f3e9e5;
+    --muted: #b9a8aa;
+    --line: #3b3033;
+    --accent: #e08a79;
+    --accent-ink: #1e191b;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 1rem;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+}
+
+/*
+ * A height on a class, not an id: the editor's own sizing is only a default
+ * and gives way to it. The border and radius are the page's too.
+ */
+.note-editor {
+  height: 30rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+
+  /* The editor's chrome. */
+  --ade-bg: var(--card);
+  --ade-bg-raised: var(--paper);
+  --ade-bg-context: var(--paper);
+  --ade-border: var(--line);
+  --ade-fg: var(--ink);
+  --ade-fg-dim: var(--muted);
+  --ade-fg-hover: var(--ink);
+  --ade-accent: var(--accent);
+  --ade-accent-fg: var(--accent-ink);
+  --ade-button-bg: var(--card);
+  --ade-input-bg: var(--card);
+  --ade-radius: 0.5rem;
+  --ade-font: system-ui, sans-serif;
+  --ade-font-size: 14px;
+
+  /* The rendering, carried into the preview iframe by the editor. */
+  --ade-preview-bg: var(--card);
+  --ade-preview-fg: var(--ink);
+  --ade-preview-strong: var(--ink);
+  --ade-preview-muted: var(--muted);
+  --ade-preview-heading: var(--ink);
+  --ade-preview-title: var(--muted);
+  --ade-preview-link: var(--accent);
+  --ade-preview-code: var(--ink);
+  --ade-preview-code-bg: var(--paper);
+  --ade-preview-surface: var(--paper);
+  --ade-preview-border: var(--line);
+  --ade-preview-accent: var(--accent);
+  --ade-preview-font: system-ui, sans-serif;
+  --ade-preview-heading-font: system-ui, sans-serif;
+  --ade-preview-heading-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .note-editor {
+    --ade-preview-scheme: dark;
+  }
+}

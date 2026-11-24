@@ -51,7 +51,9 @@ dependencies = [
  "js-sys",
  "leptos",
  "regex",
+ "send_wrapper",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
