@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AsciiDoc editor, themed</title>
+    <!--
+      No inline style or script: this page works under
+      default-src 'none'; script-src 'self' 'wasm-unsafe-eval';
+      connect-src 'self'; style-src 'self'; img-src 'self' data:
+    -->
+    <link rel="stylesheet" href="themed.css" />
+    <script type="module" src="themed.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>A themed editor with a toolbar of its page's choosing</h1>
+      <p>
+        The page sets the editor's height on a class, its colours with
+        <code>--ade-*</code> custom properties (light and dark, following the
+        system), and hides the file buttons and the label.
+      </p>
+      <div id="editor" class="note-editor"></div>
+    </main>
+  </body>
+</html>

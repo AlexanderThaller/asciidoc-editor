@@ -7,7 +7,11 @@ use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Element, Event, HtmlIFrameElement, HtmlInputElement, HtmlTextAreaElement, Node};
 
-use crate::{highlight, render, source, storage, style, sync, wysiwyg};
+use crate::{
+    highlight, render, source, storage, style, sync, theme,
+    toolbar::{Group, Item, Toolbar},
+    wysiwyg,
+};
 
 /// A document as it stood, and where the caret was at the time.
 #[derive(Clone, Debug)]
@@ -76,9 +80,16 @@ fn escape_attribute(text: &str) -> String {
 
 /// What the preview is styled with: Asciidoctor's stylesheet, then the
 /// editor's own additions over it.
-fn preview_style() -> String {
-    format!("{}\n{PREVIEW_STYLE}", render::stylesheet())
+pub(crate) fn preview_style() -> String {
+    format!(
+        "{}\n{PREVIEW_STYLE}\n{PREVIEW_THEME_STYLE}",
+        render::stylesheet()
+    )
 }
+
+/// Marks a preview document as given the page's theme; the sheet under it is
+/// replaced whenever the theme is carried in again.
+const PREVIEW_THEME_ID: &str = "asciidoc-editor-preview-theme";
 
 /// Marks a preview document as styled already.
 const PREVIEW_STYLE_ID: &str = "asciidoc-editor-preview-style";
@@ -98,9 +109,9 @@ body{margin:0;padding:1.25rem 1.5rem;min-height:100%;box-sizing:border-box;curso
  * one of those by itself.
  */
 [data-edit-line]{border-radius:3px}
-[data-edit-line]:hover{background:rgba(127,180,255,.08)}
-[data-edit-line]:focus{outline:2px solid rgba(127,180,255,.55);outline-offset:4px}
-[data-edit-line]:focus-visible{outline:2px solid rgba(127,180,255,.55);outline-offset:4px}
+[data-edit-line]:hover{background:color-mix(in srgb,var(--ade-preview-accent,#7fb4ff) 8%,transparent)}
+[data-edit-line]:focus{outline:2px solid color-mix(in srgb,var(--ade-preview-accent,#7fb4ff) 55%,transparent);outline-offset:4px}
+[data-edit-line]:focus-visible{outline:2px solid color-mix(in srgb,var(--ade-preview-accent,#7fb4ff) 55%,transparent);outline-offset:4px}
 /*
  * Admonition icons. The renderer only emits Font Awesome glyphs when the
  * document may enable `icons`, which safe mode forbids, and a webfont would
@@ -118,7 +129,44 @@ body{margin:0;padding:1.25rem 1.5rem;min-height:100%;box-sizing:border-box;curso
 .admonitionblock.caution>table td.icon .title::before{content:"\1F525"}
 /* Where a new block would be added, while the panel asking for one is open. */
 [data-edit-insert-after]{position:relative}
-[data-edit-insert-after]::after{content:"";position:absolute;left:0;right:0;bottom:-.55rem;height:2px;border-radius:2px;background:#7fb4ff}
+[data-edit-insert-after]::after{content:"";position:absolute;left:0;right:0;bottom:-.55rem;height:2px;border-radius:2px;background:var(--ade-preview-accent,#7fb4ff)}
+"#;
+
+/// The preview's colours and fonts, over Asciidoctor's. Every value is a
+/// custom property the editor carries in from the page (see [`theme`]), and
+/// falls back to what Asciidoctor's stylesheet has, so an unthemed preview
+/// looks as it always did. Selectors repeat Asciidoctor's own, coming later
+/// at the same specificity.
+const PREVIEW_THEME_STYLE: &str = r#"
+:root{color-scheme:var(--ade-preview-scheme,light);background:var(--ade-preview-bg,#fff)}
+body{background:var(--ade-preview-bg,#fff);color:var(--ade-preview-fg,rgba(0,0,0,.8));font-family:var(--ade-preview-font,"Noto Serif","DejaVu Serif",serif)}
+a,a:hover,a:focus{color:var(--ade-preview-link,#2156a5)}
+h1,h2,h3,#toctitle,.sidebarblock>.content>.title,h4,h5,h6{color:var(--ade-preview-heading,#ba3925);font-family:var(--ade-preview-heading-font,"Open Sans","DejaVu Sans",sans-serif);font-weight:var(--ade-preview-heading-weight,300)}
+#content h1>a.link,h2>a.link,h3>a.link,#toctitle>a.link,.sidebarblock>.content>.title>a.link,h4>a.link,h5>a.link,h6>a.link,#content h1>a.link:hover,h2>a.link:hover,h3>a.link:hover,h4>a.link:hover,h5>a.link:hover,h6>a.link:hover{color:var(--ade-preview-heading,#ba3925)}
+#header>h1:first-child,#content>h1:first-child:not([class]){color:var(--ade-preview-strong,rgba(0,0,0,.85))}
+#content>h1:first-child:not([class]),#header .details{border-color:var(--ade-preview-border,#dddddf)}
+.subheader,.admonitionblock td.content>.title,.audioblock>.title,.exampleblock>.title,.imageblock>.title,.listingblock>.title,.literalblock>.title,.stemblock>.title,.openblock>.title,.paragraph>.title,.quoteblock>.title,table.tableblock>.title,.verseblock>.title,.videoblock>.title,.dlist>.title,.olist>.title,.ulist>.title,.qlist>.title,.hdlist>.title,#toctitle,.sidebarblock>.content>.title{color:var(--ade-preview-title,#7a2518)}
+.admonitionblock td.content>.title,.audioblock>.title,.exampleblock>.title,.imageblock>.title,.listingblock>.title,.literalblock>.title,.stemblock>.title,.openblock>.title,.paragraph>.title,.quoteblock>.title,table.tableblock>.title,.verseblock>.title,.videoblock>.title,.dlist>.title,.olist>.title,.ulist>.title,.qlist>.title,.hdlist>.title{font-family:var(--ade-preview-font,"Noto Serif","DejaVu Serif",serif)}
+.quoteblock blockquote::before{color:var(--ade-preview-title,#7a2518)}
+hr,abbr[title],#header>h1:first-child+#toc,#header>h1:only-child,.quoteblock.excerpt>blockquote,.quoteblock .quoteblock{border-color:var(--ade-preview-border,#dddddf)}
+blockquote{border-color:var(--ade-preview-border,#ddd)}
+#toc,.sect1+.sect1{border-color:var(--ade-preview-border,#e7e7e9)}
+code,pre,kbd{font-family:var(--ade-preview-mono-font,"Droid Sans Mono","DejaVu Sans Mono",monospace)}
+code,pre,p a>code:hover{color:var(--ade-preview-code,rgba(0,0,0,.9))}
+:not(pre):not([class^=L])>code,.literalblock pre,.listingblock>.content>pre:not(.highlight),.listingblock>.content>pre[class=highlight],.listingblock>.content>pre[class^="highlight "],.prettyprint{background:var(--ade-preview-code-bg,#f7f7f8)}
+kbd{color:var(--ade-preview-fg,rgba(0,0,0,.8));background:var(--ade-preview-code-bg,#f7f7f7);border-color:var(--ade-preview-border,#ccc);box-shadow:none}
+blockquote,blockquote p,.quoteblock blockquote,.quoteblock p,.verseblock pre,.paragraph.lead>p,#preamble>.sectionbody>[class=paragraph]:first-of-type p{color:var(--ade-preview-strong,rgba(0,0,0,.85))}
+.verseblock pre,#toc ul{font-family:var(--ade-preview-heading-font,"Open Sans","DejaVu Sans",sans-serif)}
+.quoteblock .attribution cite,.verseblock .attribution cite,#header .details{color:var(--ade-preview-muted,rgba(0,0,0,.6))}
+.admonitionblock>table td.content{color:var(--ade-preview-muted,rgba(0,0,0,.6));border-left-color:var(--ade-preview-border,#dddddf)}
+table{background:var(--ade-preview-bg,#fff);border-color:var(--ade-preview-border,#dedede)}
+table.tableblock,th.tableblock,td.tableblock{border-color:var(--ade-preview-border,#dedede)}
+table thead,table tfoot,table tr.even,table tr.alt,table.stripes-all>*>tr,table.stripes-odd>*>tr:nth-of-type(odd),table.stripes-even>*>tr:nth-of-type(even),table.stripes-hover>*>tr:hover,tbody tr th{background:var(--ade-preview-surface,#f8f8f7)}
+table thead tr th,table thead tr td,table tfoot tr th,table tfoot tr td,table tr th,table tr td,tbody tr th,tbody tr th p,tfoot tr th,tfoot tr th p{color:var(--ade-preview-fg,rgba(0,0,0,.8))}
+#content #toc,.sidebarblock{background:var(--ade-preview-surface,#f8f8f7);border-color:var(--ade-preview-border,#e0e0dc)}
+.exampleblock>.content{background:var(--ade-preview-bg,#fff);border-color:var(--ade-preview-border,#e6e6e6)}
+.conum[data-value]{background:var(--ade-preview-fg,rgba(0,0,0,.8));color:var(--ade-preview-bg,#fff)!important}
+.conum[data-value] *{color:var(--ade-preview-bg,#fff)!important}
 "#;
 
 /// Which surface the document is edited through.
@@ -136,7 +184,8 @@ pub enum Mode {
 /// one nothing is written, which is what an embedding page usually wants.
 /// `on_file`, when the page gave one, is handed every file that arrives and
 /// answers with what to put in the document for it; `base` is what relative
-/// targets in the preview resolve against.
+/// targets in the preview resolve against. `toolbar` says which of the
+/// toolbar's buttons the page wants.
 #[component]
 pub fn App(
     source: RwSignal<String>,
@@ -144,8 +193,10 @@ pub fn App(
     rich: bool,
     on_file: Option<js_sys::Function>,
     base: Option<String>,
+    toolbar: Toolbar,
 ) -> impl IntoView {
     let mode = RwSignal::new(if rich { Mode::Rich } else { Mode::Source });
+    let is_rich = move || mode.get() == Mode::Rich;
     // Whether files go to the page rather than into the document.
     let hands_off_files = on_file.is_some();
     let on_file = StoredValue::new_local(on_file);
@@ -157,6 +208,7 @@ pub fn App(
     let textarea = NodeRef::<html::Textarea>::new();
     let overlay = NodeRef::<html::Pre>::new();
     let frame = NodeRef::<html::Iframe>::new();
+    follow_color_scheme(frame);
 
     // The image panel, and anything it has to say back.
     let image_panel = RwSignal::new(false);
@@ -253,6 +305,9 @@ pub fn App(
     let rerender = move |focus_line: Option<usize>| {
         let src = source.get_untracked();
         let (html, warns) = render::render(&src);
+
+        // Cheap, and it picks up a theme the page changed since.
+        carry_theme(frame);
 
         if let Some(content) = preview_content(frame) {
             content.set_inner_html(&html);
@@ -627,197 +682,227 @@ pub fn App(
     });
 
     view! {
+        // Every button is one the page may have left out (`toolbar`); the
+        // separators and groups follow what is left.
+        <Show when=move || !toolbar.is_empty(is_rich())>
         <div class="toolbar" role="toolbar" aria-label="Formatting">
-            <span class="brand">"AsciiDoc"</span>
+            {toolbar.shows(Item::Brand).then(|| view! { <span class="brand">"AsciiDoc"</span> })}
 
-            <div class="modes">
-                <button
-                    class="button"
-                    class:active=move || mode.get() == Mode::Rich
-                    on:click=move |_| mode.set(Mode::Rich)
-                >
-                    "Rich text"
-                </button>
-                <button
-                    class="button"
-                    class:active=move || mode.get() == Mode::Source
-                    on:click=move |_| mode.set(Mode::Source)
-                >
-                    "Source"
-                </button>
-            </div>
+            {toolbar.shows(Item::Mode).then(|| view! {
+                <div class="modes">
+                    <button
+                        class="button"
+                        class:active=move || mode.get() == Mode::Rich
+                        on:click=move |_| mode.set(Mode::Rich)
+                    >
+                        "Rich text"
+                    </button>
+                    <button
+                        class="button"
+                        class:active=move || mode.get() == Mode::Source
+                        on:click=move |_| mode.set(Mode::Source)
+                    >
+                        "Source"
+                    </button>
+                </div>
+            })}
 
             <Show when=move || mode.get() == Mode::Rich>
-                <span class="separator"></span>
+                {toolbar.separator_before(Group::Format, true).then(|| view! { <span class="separator"></span> })}
+                {toolbar.shows_group(Group::Format, true).then(|| view! {
                 <div class="tools">
-                    <button
-                        class="button icon"
-                        title="Bold (ctrl+B)"
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_format("bold")
-                    >
-                        <b>"B"</b>
-                    </button>
-                    <button
-                        class="button icon"
-                        title="Italic (ctrl+I)"
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_format("italic")
-                    >
-                        <i>"I"</i>
-                    </button>
-                    <button
-                        class="button icon"
-                        title="Insert a link"
-                        disabled=move || {
-                            !editing.get().is_some_and(|block| wysiwyg::takes_links(block.kind))
-                        }
-                        class:active=move || link_panel.get()
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| open_link_panel()
-                    >
-                        "🔗"
-                    </button>
-                    <button
-                        class="button icon"
-                        title="Monospace (ctrl+E)"
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_format("code")
-                    >
-                        <code>"<>"</code>
-                    </button>
+                    {toolbar.shows(Item::Bold).then(|| view! {
+                        <button
+                            class="button icon"
+                            title="Bold (ctrl+B)"
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_format("bold")
+                        >
+                            <b>"B"</b>
+                        </button>
+                    })}
+                    {toolbar.shows(Item::Italic).then(|| view! {
+                        <button
+                            class="button icon"
+                            title="Italic (ctrl+I)"
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_format("italic")
+                        >
+                            <i>"I"</i>
+                        </button>
+                    })}
+                    {toolbar.shows(Item::Link).then(|| view! {
+                        <button
+                            class="button icon"
+                            title="Insert a link"
+                            disabled=move || {
+                                !editing.get().is_some_and(|block| wysiwyg::takes_links(block.kind))
+                            }
+                            class:active=move || link_panel.get()
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| open_link_panel()
+                        >
+                            "🔗"
+                        </button>
+                    })}
+                    {toolbar.shows(Item::Code).then(|| view! {
+                        <button
+                            class="button icon"
+                            title="Monospace (ctrl+E)"
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_format("code")
+                        >
+                            <code>"<>"</code>
+                        </button>
+                    })}
                 </div>
+                })}
 
-                <span class="separator"></span>
+                {toolbar.separator_before(Group::Lists, true).then(|| view! { <span class="separator"></span> })}
+                {toolbar.shows_group(Group::Lists, true).then(|| view! {
                 <div class="tools">
-                    <button
-                        class="button icon"
-                        title="Bulleted list"
-                        disabled=move || {
-                            editing
-                                .get()
-                                .is_some_and(|block| {
-                                    matches!(
-                                        block.kind,
-                                        wysiwyg::Kind::Title
-                                            | wysiwyg::Kind::Admonition(_)
-                                            | wysiwyg::Kind::Table { .. }
-                                            | wysiwyg::Kind::Image
-                                            | wysiwyg::Kind::Attribution(_)
-                                            | wysiwyg::Kind::Verbatim
-                                    )
-                                })
-                        }
-                        class:active=move || {
-                            editing.get().map(|block| block.kind)
-                                == Some(wysiwyg::Kind::List { ordered: false })
-                        }
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_list(false)
-                    >
-                        "•"
-                    </button>
-                    <button
-                        class="button icon"
-                        title="Admonition"
-                        disabled=move || {
-                            !matches!(
-                                editing.get().map(|block| block.kind),
-                                Some(wysiwyg::Kind::Body) | Some(wysiwyg::Kind::Admonition(_))
-                            )
-                        }
-                        class:active=move || {
-                            matches!(
-                                editing.get().map(|block| block.kind),
-                                Some(wysiwyg::Kind::Admonition(_))
-                            )
-                        }
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_admonition(Some("NOTE"))
-                    >
-                        {icon_for("NOTE")}
-                    </button>
-                    <button
-                        class="button icon"
-                        title="Numbered list"
-                        disabled=move || {
-                            editing
-                                .get()
-                                .is_some_and(|block| {
-                                    matches!(
-                                        block.kind,
-                                        wysiwyg::Kind::Title
-                                            | wysiwyg::Kind::Admonition(_)
-                                            | wysiwyg::Kind::Table { .. }
-                                            | wysiwyg::Kind::Image
-                                            | wysiwyg::Kind::Attribution(_)
-                                            | wysiwyg::Kind::Verbatim
-                                    )
-                                })
-                        }
-                        class:active=move || {
-                            editing.get().map(|block| block.kind)
-                                == Some(wysiwyg::Kind::List { ordered: true })
-                        }
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_list(true)
-                    >
-                        "1."
-                    </button>
-                </div>
-
-                <span class="separator"></span>
-                <div class="tools">
-                    <button
-                        class="button"
-                        title="Body text"
-                        disabled=move || {
-                            editing.get().is_some_and(|block| {
-                                matches!(
-                                    block.kind,
-                                    wysiwyg::Kind::List { .. }
-                                        | wysiwyg::Kind::Title
-                                        | wysiwyg::Kind::Admonition(_)
-                                        | wysiwyg::Kind::Table { .. }
-                                        | wysiwyg::Kind::Image
-                                            | wysiwyg::Kind::Attribution(_)
-                                            | wysiwyg::Kind::Verbatim
+                    {toolbar.shows(Item::BulletList).then(|| view! {
+                        <button
+                            class="button icon"
+                            title="Bulleted list"
+                            disabled=move || {
+                                editing
+                                    .get()
+                                    .is_some_and(|block| {
+                                        matches!(
+                                            block.kind,
+                                            wysiwyg::Kind::Title
+                                                | wysiwyg::Kind::Admonition(_)
+                                                | wysiwyg::Kind::Table { .. }
+                                                | wysiwyg::Kind::Image
+                                                | wysiwyg::Kind::Attribution(_)
+                                                | wysiwyg::Kind::Verbatim
+                                        )
+                                    })
+                            }
+                            class:active=move || {
+                                editing.get().map(|block| block.kind)
+                                    == Some(wysiwyg::Kind::List { ordered: false })
+                            }
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_list(false)
+                        >
+                            "•"
+                        </button>
+                    })}
+                    {toolbar.shows(Item::Admonition).then(|| view! {
+                        <button
+                            class="button icon"
+                            title="Admonition"
+                            disabled=move || {
+                                !matches!(
+                                    editing.get().map(|block| block.kind),
+                                    Some(wysiwyg::Kind::Body) | Some(wysiwyg::Kind::Admonition(_))
                                 )
-                            })
-                        }
-                        class:active=move || {
-                            editing.get().map(|block| block.kind) == Some(wysiwyg::Kind::Body)
-                        }
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_level(None)
-                    >
-                        "Body"
-                    </button>
-                    <button
-                        class="button"
-                        title="Quote block"
-                        disabled=move || editing.get().is_none()
-                        class:active=move || {
-                            editing.get().and_then(|block| block.inside) == Some("quote")
-                        }
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_wrapper("quote")
-                    >
-                        "Quote"
-                    </button>
-                    <button
-                        class="button"
-                        title="Code block"
-                        disabled=move || editing.get().is_none()
-                        class:active=move || {
-                            editing.get().and_then(|block| block.inside) == Some("source")
-                        }
-                        on:mousedown=|ev| ev.prevent_default()
-                        on:click=move |_| apply_wrapper("source")
-                    >
-                        "Code"
-                    </button>
-                    {HEADINGS
+                            }
+                            class:active=move || {
+                                matches!(
+                                    editing.get().map(|block| block.kind),
+                                    Some(wysiwyg::Kind::Admonition(_))
+                                )
+                            }
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_admonition(Some("NOTE"))
+                        >
+                            {icon_for("NOTE")}
+                        </button>
+                    })}
+                    {toolbar.shows(Item::NumberedList).then(|| view! {
+                        <button
+                            class="button icon"
+                            title="Numbered list"
+                            disabled=move || {
+                                editing
+                                    .get()
+                                    .is_some_and(|block| {
+                                        matches!(
+                                            block.kind,
+                                            wysiwyg::Kind::Title
+                                                | wysiwyg::Kind::Admonition(_)
+                                                | wysiwyg::Kind::Table { .. }
+                                                | wysiwyg::Kind::Image
+                                                | wysiwyg::Kind::Attribution(_)
+                                                | wysiwyg::Kind::Verbatim
+                                        )
+                                    })
+                            }
+                            class:active=move || {
+                                editing.get().map(|block| block.kind)
+                                    == Some(wysiwyg::Kind::List { ordered: true })
+                            }
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_list(true)
+                        >
+                            "1."
+                        </button>
+                    })}
+                </div>
+                })}
+
+                {toolbar.separator_before(Group::Blocks, true).then(|| view! { <span class="separator"></span> })}
+                {toolbar.shows_group(Group::Blocks, true).then(|| view! {
+                <div class="tools">
+                    {toolbar.shows(Item::Body).then(|| view! {
+                        <button
+                            class="button"
+                            title="Body text"
+                            disabled=move || {
+                                editing.get().is_some_and(|block| {
+                                    matches!(
+                                        block.kind,
+                                        wysiwyg::Kind::List { .. }
+                                            | wysiwyg::Kind::Title
+                                            | wysiwyg::Kind::Admonition(_)
+                                            | wysiwyg::Kind::Table { .. }
+                                            | wysiwyg::Kind::Image
+                                                | wysiwyg::Kind::Attribution(_)
+                                                | wysiwyg::Kind::Verbatim
+                                    )
+                                })
+                            }
+                            class:active=move || {
+                                editing.get().map(|block| block.kind) == Some(wysiwyg::Kind::Body)
+                            }
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_level(None)
+                        >
+                            "Body"
+                        </button>
+                    })}
+                    {toolbar.shows(Item::Quote).then(|| view! {
+                        <button
+                            class="button"
+                            title="Quote block"
+                            disabled=move || editing.get().is_none()
+                            class:active=move || {
+                                editing.get().and_then(|block| block.inside) == Some("quote")
+                            }
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_wrapper("quote")
+                        >
+                            "Quote"
+                        </button>
+                    })}
+                    {toolbar.shows(Item::CodeBlock).then(|| view! {
+                        <button
+                            class="button"
+                            title="Code block"
+                            disabled=move || editing.get().is_none()
+                            class:active=move || {
+                                editing.get().and_then(|block| block.inside) == Some("source")
+                            }
+                            on:mousedown=|ev| ev.prevent_default()
+                            on:click=move |_| apply_wrapper("source")
+                        >
+                            "Code"
+                        </button>
+                    })}
+                    {toolbar.shows(Item::Headings).then(|| HEADINGS
                         .iter()
                         .map(|(label, level)| {
                             view! {
@@ -849,98 +934,120 @@ pub fn App(
                                 </button>
                             }
                         })
-                        .collect_view()}
+                        .collect_view())}
                 </div>
+                })}
             </Show>
 
-            <span class="separator"></span>
-            <button
-                class="button icon"
-                title="Undo (ctrl+Z)"
-                disabled=move || depth.get().0 == 0
-                on:mousedown=|ev| ev.prevent_default()
-                on:click=move |_| travel(true)
-            >
-                "↶"
-            </button>
-            <button
-                class="button icon"
-                title="Redo (ctrl+shift+Z)"
-                disabled=move || depth.get().1 == 0
-                on:mousedown=|ev| ev.prevent_default()
-                on:click=move |_| travel(false)
-            >
-                "↷"
-            </button>
+            <Show when=move || toolbar.separator_before(Group::History, is_rich())>
+                <span class="separator"></span>
+            </Show>
+            {toolbar.shows(Item::Undo).then(|| view! {
+                <button
+                    class="button icon"
+                    title="Undo (ctrl+Z)"
+                    disabled=move || depth.get().0 == 0
+                    on:mousedown=|ev| ev.prevent_default()
+                    on:click=move |_| travel(true)
+                >
+                    "↶"
+                </button>
+            })}
+            {toolbar.shows(Item::Redo).then(|| view! {
+                <button
+                    class="button icon"
+                    title="Redo (ctrl+shift+Z)"
+                    disabled=move || depth.get().1 == 0
+                    on:mousedown=|ev| ev.prevent_default()
+                    on:click=move |_| travel(false)
+                >
+                    "↷"
+                </button>
+            })}
 
-            <span class="separator"></span>
-            <button
-                class="button icon"
-                title="Insert a table"
-                on:mousedown=|ev| ev.prevent_default()
-                on:click=move |_| insert_below(source::NEW_TABLE)
-            >
-                "▦"
-            </button>
-            <button
-                class="button icon"
-                title="Insert a thematic break"
-                on:mousedown=|ev| ev.prevent_default()
-                on:click=move |_| insert_below(source::RULE)
-            >
-                "—"
-            </button>
-            <button
-                class="button icon"
-                title="Insert an image"
-                on:mousedown=|ev| ev.prevent_default()
-                class:active=move || image_panel.get()
-                on:click=move |_| {
-                    notice.set(None);
-                    let opening = !image_panel.get_untracked();
-                    link_panel.set(false);
-                    editing_image.set(None);
-                    image_url.set(String::new());
-                    image_alt.set(String::new());
-                    insert_after.set(opening.then(|| editing.get_untracked()).flatten());
-                    image_panel.set(opening);
-                }
-            >
-                "🖼"
-            </button>
+            <Show when=move || toolbar.separator_before(Group::Insert, is_rich())>
+                <span class="separator"></span>
+            </Show>
+            {toolbar.shows(Item::Table).then(|| view! {
+                <button
+                    class="button icon"
+                    title="Insert a table"
+                    on:mousedown=|ev| ev.prevent_default()
+                    on:click=move |_| insert_below(source::NEW_TABLE)
+                >
+                    "▦"
+                </button>
+            })}
+            {toolbar.shows(Item::Rule).then(|| view! {
+                <button
+                    class="button icon"
+                    title="Insert a thematic break"
+                    on:mousedown=|ev| ev.prevent_default()
+                    on:click=move |_| insert_below(source::RULE)
+                >
+                    "—"
+                </button>
+            })}
+            {toolbar.shows(Item::Image).then(|| view! {
+                <button
+                    class="button icon"
+                    title="Insert an image"
+                    on:mousedown=|ev| ev.prevent_default()
+                    class:active=move || image_panel.get()
+                    on:click=move |_| {
+                        notice.set(None);
+                        let opening = !image_panel.get_untracked();
+                        link_panel.set(false);
+                        editing_image.set(None);
+                        image_url.set(String::new());
+                        image_alt.set(String::new());
+                        insert_after.set(opening.then(|| editing.get_untracked()).flatten());
+                        image_panel.set(opening);
+                    }
+                >
+                    "🖼"
+                </button>
+            })}
 
             <div class="spacer"></div>
-            <label class="button">
-                "Open"
-                <input
-                    type="file"
-                    accept=".adoc,.asciidoc,.txt"
-                    on:change=move |ev| {
-                        let input: HtmlInputElement = event_target(&ev);
-                        if let Some(file) = input.files().and_then(|f| f.get(0)) {
-                            storage::read_file(&file, move |text| source.set(text));
+            {toolbar.shows(Item::Open).then(|| view! {
+                <label class="button">
+                    "Open"
+                    <input
+                        type="file"
+                        accept=".adoc,.asciidoc,.txt"
+                        on:change=move |ev| {
+                            let input: HtmlInputElement = event_target(&ev);
+                            if let Some(file) = input.files().and_then(|f| f.get(0)) {
+                                storage::read_file(&file, move |text| source.set(text));
+                            }
                         }
+                    />
+                </label>
+            })}
+            {toolbar.shows(Item::SaveAdoc).then(|| view! {
+                <button
+                    class="button"
+                    on:click=move |_| {
+                        storage::download("document.adoc", "text/plain", &source.get_untracked());
                     }
-                />
-            </label>
-            <button
-                class="button"
-                on:click=move |_| {
-                    storage::download("document.adoc", "text/plain", &source.get_untracked());
-                }
-            >
-                "Save .adoc"
-            </button>
-            <button
-                class="button"
-                on:click=move |_| {
-                    let html = render::render_standalone(&source.get_untracked());
-                    storage::download("document.html", "text/html", &html);
-                }
-            >
-                "Export .html"
-            </button>
+                >
+                    "Save .adoc"
+                </button>
+            })}
+            {toolbar.shows(Item::ExportHtml).then(|| view! {
+                <button
+                    class="button"
+                    on:click=move |_| {
+                        let html = render::render_standalone(&source.get_untracked());
+                        storage::download("document.html", "text/html", &html);
+                    }
+                >
+                    "Export .html"
+                </button>
+            })}
         </div>
+        </Show>
 
         <Show when=move || mode.get() == Mode::Rich>
             <div class="toolbar context" role="toolbar" aria-label="This block">
@@ -1141,7 +1248,9 @@ pub fn App(
             </div>
         </Show>
 
-
+        // The panels hang over the top of the panes, just below whatever
+        // toolbars the page kept, however many rows those wrapped into.
+        <div class="panes" class:rich=move || mode.get() == Mode::Rich>
         <Show when=move || link_panel.get()>
             <div class="panel">
                 <span class="chip">
@@ -1260,7 +1369,6 @@ pub fn App(
             </div>
         </Show>
 
-        <div class="panes" class:rich=move || mode.get() == Mode::Rich>
             <div class="editor">
                 <pre class="overlay" node_ref=overlay inner_html=move || highlight::highlight(&source.get())></pre>
                 <textarea
@@ -1298,6 +1406,7 @@ pub fn App(
                             {
                                 web_sys::console::error_1(&error);
                             }
+                            carry_theme(frame);
 
                             wysiwyg::attach(
                                 &document,
@@ -1406,6 +1515,66 @@ fn focus_block(frame: NodeRef<html::Iframe>, content: &Element, line: usize) {
     };
 
     wysiwyg::focus(&document, &block);
+}
+
+/// Carries the page's theme into the preview: custom properties stop at the
+/// iframe, so the preview's are read off the editor's element, resolved, and
+/// written into a stylesheet of the preview's own (see [`theme`]).
+fn carry_theme(frame: NodeRef<html::Iframe>) {
+    let Some(iframe) = frame.try_get_untracked().flatten() else {
+        return;
+    };
+    let Some(document) = preview_document(frame) else {
+        return;
+    };
+    let Some(host) = iframe.closest(".asciidoc-editor").ok().flatten() else {
+        return;
+    };
+    let Some(computed) =
+        web_sys::window().and_then(|window| window.get_computed_style(&host).ok().flatten())
+    else {
+        return;
+    };
+
+    let values = theme::PREVIEW_PROPERTIES.iter().map(|name| {
+        let value = computed
+            .get_property_value(&theme::resolved_name(name))
+            .unwrap_or_default();
+        (*name, value)
+    });
+
+    if let Err(error) = style::replace(&document, &theme::preview_sheet(values), PREVIEW_THEME_ID) {
+        web_sys::console::error_1(&error);
+    }
+}
+
+/// Carries the theme in again whenever the system switches between light and
+/// dark, which the page's variables may well follow, until the editor goes.
+fn follow_color_scheme(frame: NodeRef<html::Iframe>) {
+    let Some(query) = web_sys::window().and_then(|window| {
+        window
+            .match_media("(prefers-color-scheme: dark)")
+            .ok()
+            .flatten()
+    }) else {
+        return;
+    };
+
+    let listener = Closure::<dyn FnMut()>::new(move || carry_theme(frame));
+    if query
+        .add_event_listener_with_callback("change", listener.as_ref().unchecked_ref())
+        .is_err()
+    {
+        return;
+    }
+
+    // Closures and query lists are not `Send`; the browser has one thread.
+    let held = send_wrapper::SendWrapper::new((query, listener));
+    on_cleanup(move || {
+        let (query, listener) = held.take();
+        let _ =
+            query.remove_event_listener_with_callback("change", listener.as_ref().unchecked_ref());
+    });
 }
 
 /// The document inside the preview iframe.

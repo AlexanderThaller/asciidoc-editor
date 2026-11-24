@@ -28,6 +28,8 @@ mod storage;
 mod style;
 mod sync;
 mod table;
+mod theme;
+mod toolbar;
 mod wysiwyg;
 
 use std::{
@@ -75,6 +77,64 @@ export interface MountOptions {
      * such as `/files/`. Defaults to the page's own address.
      */
     baseUrl?: string;
+    /**
+     * Which of the toolbar's buttons to show. Without it, all of them.
+     */
+    toolbar?: ToolbarOptions;
+    /**
+     * The defaults the editor's colours start from: `"dark"` (the default),
+     * `"light"`, or `"auto"` to follow `prefers-color-scheme`. The page
+     * overrides any of them with `--ade-*` custom properties.
+     */
+    theme?: Theme;
+}
+
+/** Light or dark defaults for the editor's own colours. */
+export type Theme = "dark" | "light" | "auto";
+
+/**
+ * A button on the toolbar, by its stable id. Shortcuts (ctrl+B and so on)
+ * keep working when their button is hidden.
+ */
+export type ToolbarItem =
+    | "brand"
+    | "mode"
+    | "bold"
+    | "italic"
+    | "link"
+    | "code"
+    | "bulletList"
+    | "numberedList"
+    | "admonition"
+    | "body"
+    | "quote"
+    | "codeBlock"
+    | "headings"
+    | "undo"
+    | "redo"
+    | "table"
+    | "rule"
+    | "image"
+    | "open"
+    | "saveAdoc"
+    | "exportHtml";
+
+/**
+ * A run of buttons, named as a whole: `format` (bold, italic, link, code),
+ * `lists` (bulletList, admonition, numberedList), `blocks` (body, quote,
+ * codeBlock, headings), `history` (undo, redo), `insert` (table, rule,
+ * image), `file` (open, saveAdoc, exportHtml).
+ */
+export type ToolbarGroup = "format" | "lists" | "blocks" | "history" | "insert" | "file";
+
+/**
+ * Which buttons the toolbar has. `show` keeps only the items and groups it
+ * names; `hide` then takes away the ones it names. An unknown id makes
+ * `mount` throw. With nothing left, the toolbar is not drawn.
+ */
+export interface ToolbarOptions {
+    show?: (ToolbarItem | ToolbarGroup)[];
+    hide?: (ToolbarItem | ToolbarGroup)[];
 }
 
 /** The element to mount into, or a selector naming it. */
@@ -121,6 +181,9 @@ pub struct Editor {
     host: HtmlElement,
 }
 
+/// The attribute the stylesheet picks the light or dark defaults by.
+const THEME_ATTRIBUTE: &str = "data-ade-theme";
+
 #[wasm_bindgen]
 impl Editor {
     /// The document, as AsciiDoc.
@@ -152,6 +215,7 @@ impl Editor {
     pub fn destroy(&mut self) {
         self.mounted = None;
         let _ = self.host.class_list().remove_1(CLASS);
+        let _ = self.host.remove_attribute(THEME_ATTRIBUTE);
     }
 }
 
@@ -161,8 +225,9 @@ impl Editor {
 /// Options, all of them optional: `value` to open with, `autosave` naming a
 /// `localStorage` key to keep the document under, `richText` to start in
 /// rich text rather than source (the default), `onFile` to be handed pasted,
-/// dropped and picked files rather than embedding them, and `baseUrl` for
-/// relative targets in the rendering to resolve against.
+/// dropped and picked files rather than embedding them, `baseUrl` for
+/// relative targets in the rendering to resolve against, `toolbar` naming
+/// the buttons to show or hide, and `theme` for light or dark defaults.
 #[wasm_bindgen]
 pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Editor, JsValue> {
     console_error_panic_hook::set_once();
@@ -179,6 +244,9 @@ pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Edit
     let base = string_option(&options, "baseUrl")
         .map(|base| absolute(&host, &base))
         .transpose()?;
+    let toolbar = toolbar_option(&options)?;
+    let theme = theme::Theme::parse(string_option(&options, "theme").as_deref())
+        .map_err(|error| JsValue::from_str(&error))?;
 
     // Every edit splices lines back together with LF. A document written with
     // CRLF would come back with every line changed, so it is edited as LF and
@@ -190,6 +258,7 @@ pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Edit
     // Added rather than assigned: the page may well have dressed the element
     // it is handing over, and those classes are not the editor's to discard.
     host.class_list().add_1(CLASS)?;
+    host.set_attribute(THEME_ATTRIBUTE, theme.attribute())?;
 
     // The signal is made inside the mount so that it belongs to the same
     // reactive owner as everything reading it; the view runs before this
@@ -208,6 +277,7 @@ pub fn mount(target: &MountTarget, options: Option<MountOptions>) -> Result<Edit
                 rich=rich
                 on_file=on_file.clone()
                 base=base.clone()
+                toolbar=toolbar
             />
         }
     });
@@ -279,6 +349,46 @@ fn bool_option(options: &JsValue, name: &str) -> Option<bool> {
     js_sys::Reflect::get(options, &JsValue::from_str(name))
         .ok()?
         .as_bool()
+}
+
+/// The `toolbar` option: `{ show?: string[], hide?: string[] }`.
+fn toolbar_option(options: &JsValue) -> Result<toolbar::Toolbar, JsValue> {
+    let toolbar =
+        js_sys::Reflect::get(options, &JsValue::from_str("toolbar")).unwrap_or(JsValue::UNDEFINED);
+    if toolbar.is_undefined() || toolbar.is_null() {
+        return Ok(toolbar::Toolbar::default());
+    }
+    if !toolbar.is_object() {
+        return Err(JsValue::from_str(
+            "toolbar: expected an object with show and/or hide",
+        ));
+    }
+
+    let show = names(&toolbar, "show")?;
+    let hide = names(&toolbar, "hide")?.unwrap_or_default();
+    toolbar::Toolbar::new(show.as_deref(), &hide).map_err(|error| JsValue::from_str(&error))
+}
+
+/// A list of names under `field` of `object`, if there is one.
+fn names(object: &JsValue, field: &str) -> Result<Option<Vec<String>>, JsValue> {
+    let value = js_sys::Reflect::get(object, &JsValue::from_str(field))?;
+    if value.is_undefined() || value.is_null() {
+        return Ok(None);
+    }
+    if !js_sys::Array::is_array(&value) {
+        return Err(JsValue::from_str(&format!(
+            "toolbar.{field}: expected an array of ids"
+        )));
+    }
+
+    js_sys::Array::from(&value)
+        .iter()
+        .map(|name| {
+            name.as_string()
+                .ok_or_else(|| JsValue::from_str(&format!("toolbar.{field}: ids are strings")))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 fn function_option(options: &JsValue, name: &str) -> Option<js_sys::Function> {

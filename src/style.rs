@@ -46,6 +46,48 @@ pub fn adopt(document: &Document, css: &str, key: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
+/// Puts `css` on `document` under `key`, or, if a sheet is there under that
+/// key already, replaces what that sheet holds: for styling that changes
+/// while the document lives, such as the theme the page sets.
+pub fn replace(document: &Document, css: &str, key: &str) -> Result<(), JsValue> {
+    let marker = JsValue::from_str(key);
+    let existing = Reflect::get(document, &marker)?;
+
+    if existing.is_object() {
+        let replace =
+            Reflect::get(&existing, &JsValue::from_str("replaceSync"))?.dyn_into::<Function>()?;
+        replace.call1(&existing, &JsValue::from_str(css))?;
+        return Ok(());
+    }
+
+    if let Some(style) = document.get_element_by_id(key) {
+        style.set_text_content(Some(css));
+        return Ok(());
+    }
+
+    match constructed(document, css) {
+        Some(sheet) => {
+            let adopted = JsValue::from_str("adoptedStyleSheets");
+            let sheets = Array::from(&Reflect::get(document, &adopted)?);
+            sheets.push(&sheet);
+            Reflect::set(document, &adopted, &sheets)?;
+            // The sheet itself is the marker, kept to be replaced later.
+            Reflect::set(document, &marker, &sheet)?;
+        }
+        None => {
+            let style = document.create_element("style")?;
+            style.set_id(key);
+            style.set_text_content(Some(css));
+            document
+                .head()
+                .ok_or_else(|| JsValue::from_str("the document has no head"))?
+                .append_child(&style)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// A stylesheet holding `css`, made in `document`'s own window.
 ///
 /// The constructor has to be that window's: a document adopts only sheets

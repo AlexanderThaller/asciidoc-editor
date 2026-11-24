@@ -17,12 +17,15 @@ console_error_panic_hook = "0.1.7"
 js-sys = "0.3"
 leptos = { version = "0.8.20", features = ["csr"] }
 regex = "1.13.1"
+# Lets a browser-only listener be handed to the reactive cleanup, which asks
+# for `Send`; already in the tree through leptos.
+send_wrapper = "0.6"
 # Pinned exactly: the generator that turns the wasm into a loadable module
 # must be the same version, and it comes from nixpkgs (see flake.nix).
 wasm-bindgen = "=0.2.127"
 # Waits on the promise a page's `onFile` may answer with.
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["HtmlIFrameElement", "HtmlTextAreaElement", "HtmlAnchorElement", "HtmlInputElement", "Document", "Element", "HtmlElement", "Window", "Storage", "Blob", "BlobPropertyBag", "Url", "File", "FileList", "FileReader", "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition", "DomTokenList", "CssStyleDeclaration", "Event", "MouseEvent", "EventTarget", "NodeList", "console", "Range", "DocumentFragment", "Selection", "KeyboardEvent", "DomStringMap", "HtmlDocument", "DomRect", "ClipboardEvent", "DataTransfer", "DragEvent"] }
+web-sys = { version = "0.3", features = ["HtmlIFrameElement", "HtmlTextAreaElement", "HtmlAnchorElement", "HtmlInputElement", "Document", "Element", "HtmlElement", "Window", "Storage", "Blob", "BlobPropertyBag", "Url", "File", "FileList", "FileReader", "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition", "DomTokenList", "CssStyleDeclaration", "Event", "MouseEvent", "EventTarget", "NodeList", "console", "Range", "DocumentFragment", "Selection", "KeyboardEvent", "DomStringMap", "HtmlDocument", "DomRect", "ClipboardEvent", "DataTransfer", "DragEvent", "MediaQueryList"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }

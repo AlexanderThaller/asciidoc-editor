@@ -47,7 +47,13 @@ else to serve, because the stylesheets are inside the wasm.
 </script>
 ```
 
-The editor fills the element it is given, so give that element a height.
+The editor fills the element it is given, so give that element a height —
+by id, class or anything else: the editor's own sizing (`height: 100%`, a
+`min-height` of 20rem) is a default at zero specificity, so any rule of the
+page's wins, and so do the element's margins, padding and border. One catch:
+the editor's stylesheet is not in a cascade layer, and an unlayered rule beats
+every layered one, so a height set inside `@layer` (Tailwind's
+`@layer components`, say) loses to the default. Set it outside any layer.
 
 Loading the module from a bundler works the same way. The wasm is fetched
 relative to the module (`new URL(..., import.meta.url)`), which Vite, webpack 5
@@ -72,6 +78,11 @@ whatever classes the page put on it.
 | `richText` | `true` | start in rich text rather than source |
 | `onFile` | none | takes pasted, dropped and picked files; answers with the AsciiDoc to put in for each (`FileCallback`) |
 | `baseUrl` | the page's address | what relative image and link targets in the rendering resolve against |
+| `toolbar` | every button | which toolbar buttons to show (`{ show?, hide? }`, see [Toolbar](#toolbar)) |
+| `theme` | `"dark"` | `"dark"`, `"light"`, or `"auto"` to follow `prefers-color-scheme`: the defaults the colours start from (see [Theming](#theming)) |
+
+`mount` throws on an unknown toolbar id or theme, rather than quietly leaving
+a button the page meant to hide.
 
 With `autosave` set and no `value`, the editor opens whatever was last saved
 under that key.
@@ -118,6 +129,133 @@ relative target such as `image::assets/a.png[]` resolves against the page.
 instead: with `baseUrl: "/files/"` that image loads from `/files/assets/a.png`.
 The document itself is not changed.
 
+### Toolbar
+
+Every button has a stable id; `show` keeps only the ids it names, and `hide`
+then takes away the ones it names. Either can name a whole group.
+
+```js
+// A page that saves the document itself has no use for the file buttons.
+mount("#editor", { toolbar: { hide: ["brand", "file"] } });
+
+// Only formatting, and undo.
+mount("#editor", { toolbar: { show: ["format", "history"] } });
+```
+
+| Group | Ids | |
+|---|---|---|
+| | `brand` | the "AsciiDoc" label |
+| | `mode` | the Rich text / Source switch |
+| `format` | `bold`, `italic`, `link`, `code` | inline formatting (rich text only) |
+| `lists` | `bulletList`, `admonition`, `numberedList` | lists, and the note admonition (rich text only) |
+| `blocks` | `body`, `quote`, `codeBlock`, `headings` | the kind of block; `headings` is all three heading buttons (rich text only) |
+| `history` | `undo`, `redo` | |
+| `insert` | `table`, `rule`, `image` | insert a table, a thematic break, an image |
+| `file` | `open`, `saveAdoc`, `exportHtml` | open a file, download `.adoc`, download `.html` |
+
+The separators follow what is left: none at either end, none around a group
+that is gone. With nothing left the toolbar row is not drawn at all. Hiding a
+button does not take its shortcut away (ctrl+B, ctrl+I, ctrl+E, ctrl+Z), nor
+the bar below it that acts on the block being edited. Hiding `mode` leaves the
+editor in the mode `richText` chose.
+
+### Theming
+
+The editor's colours, fonts and radius are custom properties a page sets —
+on the element it mounts into, or on any ancestor — in a stylesheet of its own:
+
+```css
+#editor {
+  --ade-bg: #fff;
+  --ade-accent: #a9434b;
+  --ade-preview-link: #a9434b;
+}
+
+@media (prefers-color-scheme: dark) {
+  #editor {
+    --ade-bg: #1e191b;
+    --ade-accent: #e08a79;
+    --ade-preview-bg: #272022;
+    --ade-preview-fg: #f3e9e5;
+    --ade-preview-scheme: dark;
+  }
+}
+```
+
+The editor never sets an `--ade-*` property itself, so whatever the page sets
+wins, whatever its selector. Anything left unset falls back to the editor's
+own look, which `theme` picks: `"dark"` (the default, as the editor has always
+looked), `"light"`, or `"auto"` to follow `prefers-color-scheme`. The theme
+only decides the fallbacks of the editor's chrome; the preview falls back to
+Asciidoctor's look, a white page, in every theme.
+
+The editor's chrome — toolbars, source pane, status bar, panels:
+
+| Property | Dark | Light | |
+|---|---|---|---|
+| `--ade-bg` | `#1b1f24` | `#ffffff` | the source pane, and behind everything |
+| `--ade-bg-raised` | `#22272e` | `#f6f8fa` | toolbar, status bar, panels |
+| `--ade-bg-context` | `#1e242c` | `#eef1f4` | the bar for the block being edited |
+| `--ade-border` | `#343b45` | `#d0d7de` | borders and separators |
+| `--ade-fg` | `#d5dae1` | `#1f2328` | text |
+| `--ade-fg-dim` | `#8b95a3` | `#656d76` | hints, labels, the status bar |
+| `--ade-fg-hover` | `#fff` | `#000` | a button's text under the pointer |
+| `--ade-accent` | `#7fb4ff` | `#0969da` | active buttons, focus, the caret |
+| `--ade-accent-fg` | `#10151c` | `#fff` | text on the accent |
+| `--ade-button-bg` | `#2b313a` | `#fff` | buttons and chips |
+| `--ade-input-bg` | `#10151c` | `#fff` | the panels' text fields |
+| `--ade-danger` | `#ff9d9d` | `#cf222e` | delete buttons |
+| `--ade-danger-border` | `#5b3138` | `#f3b8bd` | |
+| `--ade-danger-bg` | `#4a262c` | `#ffebe9` | a delete button under the pointer |
+| `--ade-warn` | `#e6c07b` | `#9a6700` | warnings in the status bar |
+| `--ade-selection` | `rgba(127,180,255,.28)` | `rgba(9,105,218,.2)` | selected source |
+| `--ade-shadow` | `rgba(0,0,0,.35)` | `rgba(31,35,40,.15)` | under the panels |
+| `--ade-syntax-heading`, `-delim`, `-verbatim`, `-attr`, `-title`, `-admonition`, `-marker`, `-bold`, `-italic`, `-code` | | | the source highlighting |
+
+Not themed by light or dark:
+
+| Property | Default | |
+|---|---|---|
+| `--ade-radius` | `5px` | buttons and fields |
+| `--ade-font` | `system-ui, -apple-system, "Segoe UI", sans-serif` | the interface |
+| `--ade-font-size` | `13px` | the interface; smaller text scales with it |
+| `--ade-mono-font` | `ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace` | the source pane |
+| `--ade-mono-size` | `13.5px` | the source pane |
+| `--ade-mono-line` | `1.6` | the source pane's line height |
+| `--ade-pad` | `1rem` | the source pane's padding |
+
+The rendering, in the preview iframe. Custom properties do not cross into an
+iframe, so the editor reads these off its element, resolved, and writes them
+into a stylesheet of the preview's own: on load, at every render, and when the
+system switches between light and dark. A value that could break out of its
+declaration (`;`, `{`, `}`, `<`, `>`, `\`, `/*`) is left out.
+
+| Property | Default (Asciidoctor's) | |
+|---|---|---|
+| `--ade-preview-bg` | `#fff` | the page |
+| `--ade-preview-fg` | `rgba(0,0,0,.8)` | text, table cells |
+| `--ade-preview-strong` | `rgba(0,0,0,.85)` | the document title, quotes, a lead paragraph |
+| `--ade-preview-muted` | `rgba(0,0,0,.6)` | admonition text, attributions |
+| `--ade-preview-heading` | `#ba3925` | section headings |
+| `--ade-preview-title` | `#7a2518` | block titles, the table of contents' title |
+| `--ade-preview-link` | `#2156a5` | links |
+| `--ade-preview-code` | `rgba(0,0,0,.9)` | code text |
+| `--ade-preview-code-bg` | `#f7f7f8` | code and listing blocks |
+| `--ade-preview-surface` | `#f8f8f7` | table heads and stripes, sidebars, the table of contents |
+| `--ade-preview-border` | `#dddddf` | rules, table and block borders |
+| `--ade-preview-accent` | `#7fb4ff` | the editable block under the pointer, in focus, and where a new one would go |
+| `--ade-preview-font` | `"Noto Serif", "DejaVu Serif", serif` | text |
+| `--ade-preview-heading-font` | `"Open Sans", "DejaVu Sans", sans-serif` | headings |
+| `--ade-preview-heading-weight` | `300` | headings |
+| `--ade-preview-mono-font` | `"Droid Sans Mono", "DejaVu Sans Mono", monospace` | code |
+| `--ade-preview-scheme` | `light` | the preview's `color-scheme`: its scrollbars and form controls |
+
+A page that changes these by other means than a media query (a theme switch of
+its own, say) has them picked up by the preview at the next render.
+
+`demo/themed.html` is a page doing this: a height on a class, colours for light
+and dark, and no file buttons — under the strict policy below.
+
 ### Content Security Policy
 
 The editor runs under a strict policy. It has no inline scripts or event
@@ -142,7 +280,10 @@ style-src 'self'; img-src 'self' data:; base-uri 'self'
 
 The preview iframe is `srcdoc`, so it inherits the page's policy and needs no
 `frame-src`; `frame-ancestors 'none'` and `X-Frame-Options: DENY` do not stop
-it. Two things a strict `style-src` still takes away: `style="…"` attributes in
+it. Theming needs nothing more either: the page sets the `--ade-*` properties in
+a stylesheet of its own, which `style-src 'self'` allows, and the editor
+carries the preview's in through another constructed stylesheet. Two things a
+strict `style-src` still takes away: `style="…"` attributes in
 the rendering (column widths of a table with `cols`, for one), and the
 fallback for browsers without constructed stylesheets (Safari before 16.4),
 where the editor puts `<style>` elements on the page instead.

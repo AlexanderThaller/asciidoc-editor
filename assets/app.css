@@ -1,14 +1,135 @@
+/*
+ * Theming. A page sets `--ade-*` custom properties (listed in the README) on
+ * the element it mounts into, or on any ancestor. The editor never sets
+ * those: it reads each into a private `--_ade-*` with today's look as the
+ * fallback, so the page's value wins whatever its selector, and an inherited
+ * one is not shadowed. The `--_ade-preview-*` ones are carried into the
+ * preview iframe, which custom properties do not reach by themselves.
+ *
+ * `data-ade-theme` (the `theme` option) picks the fallbacks: dark (the
+ * default), light, or auto, which follows prefers-color-scheme.
+ */
 .asciidoc-editor {
-  --bg: #1b1f24;
-  --bg-raised: #22272e;
-  --border: #343b45;
-  --fg: #d5dae1;
-  --fg-dim: #8b95a3;
-  --accent: #7fb4ff;
-  --editor-font: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --editor-size: 13.5px;
-  --editor-line: 1.6;
-  --editor-pad: 1rem;
+  --_ade-bg: var(--ade-bg, #1b1f24);
+  --_ade-bg-raised: var(--ade-bg-raised, #22272e);
+  --_ade-bg-context: var(--ade-bg-context, #1e242c);
+  --_ade-border: var(--ade-border, #343b45);
+  --_ade-fg: var(--ade-fg, #d5dae1);
+  --_ade-fg-dim: var(--ade-fg-dim, #8b95a3);
+  --_ade-fg-hover: var(--ade-fg-hover, #fff);
+  --_ade-accent: var(--ade-accent, #7fb4ff);
+  --_ade-accent-fg: var(--ade-accent-fg, #10151c);
+  --_ade-button-bg: var(--ade-button-bg, #2b313a);
+  --_ade-input-bg: var(--ade-input-bg, #10151c);
+  --_ade-danger: var(--ade-danger, #ff9d9d);
+  --_ade-danger-border: var(--ade-danger-border, #5b3138);
+  --_ade-danger-bg: var(--ade-danger-bg, #4a262c);
+  --_ade-warn: var(--ade-warn, #e6c07b);
+  --_ade-selection: var(--ade-selection, rgba(127, 180, 255, 0.28));
+  --_ade-shadow: var(--ade-shadow, rgba(0, 0, 0, 0.35));
+  --_ade-syntax-heading: var(--ade-syntax-heading, #ff9d6b);
+  --_ade-syntax-delim: var(--ade-syntax-delim, #6b7684);
+  --_ade-syntax-verbatim: var(--ade-syntax-verbatim, #9ecbff);
+  --_ade-syntax-attr: var(--ade-syntax-attr, #d2a8ff);
+  --_ade-syntax-title: var(--ade-syntax-title, #e6c07b);
+  --_ade-syntax-admonition: var(--ade-syntax-admonition, #ff7b72);
+  --_ade-syntax-marker: var(--ade-syntax-marker, #7fb4ff);
+  --_ade-syntax-bold: var(--ade-syntax-bold, #f0f4f9);
+  --_ade-syntax-italic: var(--ade-syntax-italic, #c8d2de);
+  --_ade-syntax-code: var(--ade-syntax-code, #a5d6a7);
+
+  /* Not themed by light or dark: the preview has always been a white page. */
+  --_ade-preview-bg: var(--ade-preview-bg, #fff);
+  --_ade-preview-fg: var(--ade-preview-fg, rgba(0, 0, 0, 0.8));
+  --_ade-preview-strong: var(--ade-preview-strong, rgba(0, 0, 0, 0.85));
+  --_ade-preview-muted: var(--ade-preview-muted, rgba(0, 0, 0, 0.6));
+  --_ade-preview-heading: var(--ade-preview-heading, #ba3925);
+  --_ade-preview-title: var(--ade-preview-title, #7a2518);
+  --_ade-preview-link: var(--ade-preview-link, #2156a5);
+  --_ade-preview-code: var(--ade-preview-code, rgba(0, 0, 0, 0.9));
+  --_ade-preview-code-bg: var(--ade-preview-code-bg, #f7f7f8);
+  --_ade-preview-surface: var(--ade-preview-surface, #f8f8f7);
+  --_ade-preview-border: var(--ade-preview-border, #dddddf);
+  --_ade-preview-accent: var(--ade-preview-accent, #7fb4ff);
+  --_ade-preview-font: var(--ade-preview-font, "Noto Serif", "DejaVu Serif", serif);
+  --_ade-preview-heading-font: var(--ade-preview-heading-font, "Open Sans", "DejaVu Sans", sans-serif);
+  --_ade-preview-heading-weight: var(--ade-preview-heading-weight, 300);
+  --_ade-preview-mono-font: var(--ade-preview-mono-font, "Droid Sans Mono", "DejaVu Sans Mono", monospace);
+  --_ade-preview-scheme: var(--ade-preview-scheme, light);
+
+  --_ade-radius: var(--ade-radius, 5px);
+  --_ade-font: var(--ade-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  --_ade-font-size: var(--ade-font-size, 13px);
+  --_ade-mono-font: var(--ade-mono-font, ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace);
+  --_ade-mono-size: var(--ade-mono-size, 13.5px);
+  --_ade-mono-line: var(--ade-mono-line, 1.6);
+  --_ade-pad: var(--ade-pad, 1rem);
+}
+
+/*
+ * The light fallbacks, for theme "light" and for "auto" on a light system.
+ * Written out twice: a media query cannot be joined to a selector list.
+ */
+.asciidoc-editor[data-ade-theme="light"] {
+  --_ade-bg: var(--ade-bg, #ffffff);
+  --_ade-bg-raised: var(--ade-bg-raised, #f6f8fa);
+  --_ade-bg-context: var(--ade-bg-context, #eef1f4);
+  --_ade-border: var(--ade-border, #d0d7de);
+  --_ade-fg: var(--ade-fg, #1f2328);
+  --_ade-fg-dim: var(--ade-fg-dim, #656d76);
+  --_ade-fg-hover: var(--ade-fg-hover, #000);
+  --_ade-accent: var(--ade-accent, #0969da);
+  --_ade-accent-fg: var(--ade-accent-fg, #fff);
+  --_ade-button-bg: var(--ade-button-bg, #fff);
+  --_ade-input-bg: var(--ade-input-bg, #fff);
+  --_ade-danger: var(--ade-danger, #cf222e);
+  --_ade-danger-border: var(--ade-danger-border, #f3b8bd);
+  --_ade-danger-bg: var(--ade-danger-bg, #ffebe9);
+  --_ade-warn: var(--ade-warn, #9a6700);
+  --_ade-selection: var(--ade-selection, rgba(9, 105, 218, 0.2));
+  --_ade-shadow: var(--ade-shadow, rgba(31, 35, 40, 0.15));
+  --_ade-syntax-heading: var(--ade-syntax-heading, #bc4c00);
+  --_ade-syntax-delim: var(--ade-syntax-delim, #8c959f);
+  --_ade-syntax-verbatim: var(--ade-syntax-verbatim, #0a3069);
+  --_ade-syntax-attr: var(--ade-syntax-attr, #8250df);
+  --_ade-syntax-title: var(--ade-syntax-title, #953800);
+  --_ade-syntax-admonition: var(--ade-syntax-admonition, #cf222e);
+  --_ade-syntax-marker: var(--ade-syntax-marker, #0969da);
+  --_ade-syntax-bold: var(--ade-syntax-bold, #1f2328);
+  --_ade-syntax-italic: var(--ade-syntax-italic, #424a53);
+  --_ade-syntax-code: var(--ade-syntax-code, #116329);
+}
+
+@media (prefers-color-scheme: light) {
+  .asciidoc-editor[data-ade-theme="auto"] {
+    --_ade-bg: var(--ade-bg, #ffffff);
+    --_ade-bg-raised: var(--ade-bg-raised, #f6f8fa);
+    --_ade-bg-context: var(--ade-bg-context, #eef1f4);
+    --_ade-border: var(--ade-border, #d0d7de);
+    --_ade-fg: var(--ade-fg, #1f2328);
+    --_ade-fg-dim: var(--ade-fg-dim, #656d76);
+    --_ade-fg-hover: var(--ade-fg-hover, #000);
+    --_ade-accent: var(--ade-accent, #0969da);
+    --_ade-accent-fg: var(--ade-accent-fg, #fff);
+    --_ade-button-bg: var(--ade-button-bg, #fff);
+    --_ade-input-bg: var(--ade-input-bg, #fff);
+    --_ade-danger: var(--ade-danger, #cf222e);
+    --_ade-danger-border: var(--ade-danger-border, #f3b8bd);
+    --_ade-danger-bg: var(--ade-danger-bg, #ffebe9);
+    --_ade-warn: var(--ade-warn, #9a6700);
+    --_ade-selection: var(--ade-selection, rgba(9, 105, 218, 0.2));
+    --_ade-shadow: var(--ade-shadow, rgba(31, 35, 40, 0.15));
+    --_ade-syntax-heading: var(--ade-syntax-heading, #bc4c00);
+    --_ade-syntax-delim: var(--ade-syntax-delim, #8c959f);
+    --_ade-syntax-verbatim: var(--ade-syntax-verbatim, #0a3069);
+    --_ade-syntax-attr: var(--ade-syntax-attr, #8250df);
+    --_ade-syntax-title: var(--ade-syntax-title, #953800);
+    --_ade-syntax-admonition: var(--ade-syntax-admonition, #cf222e);
+    --_ade-syntax-marker: var(--ade-syntax-marker, #0969da);
+    --_ade-syntax-bold: var(--ade-syntax-bold, #1f2328);
+    --_ade-syntax-italic: var(--ade-syntax-italic, #424a53);
+    --_ade-syntax-code: var(--ade-syntax-code, #116329);
+  }
 }
 
 /*
@@ -19,7 +140,7 @@
  * initial value here; the editor's own rules follow, and being more specific
  * they have the last word.
  */
-.asciidoc-editor, .asciidoc-editor * {
+.asciidoc-editor * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -44,6 +165,21 @@
 }
 
 /*
+ * The element the page handed over is the page's: its size, margins, padding
+ * and border are whatever the page says. These are only defaults, at zero
+ * specificity (`:where`), so any rule of the page's own wins — a height set
+ * on the element by class, say, which a plain `.asciidoc-editor` rule would
+ * override, its sheet being adopted after the page's.
+ */
+:where(.asciidoc-editor) {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  min-height: 20rem;
+}
+
+/*
  * The editor fills whatever it is put in. Flex rather than fixed rows: the
  * context bar is only there in rich text mode, and the layout must not depend
  * on how many rows exist. Positioned, so the panels hang inside it rather
@@ -54,11 +190,11 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  height: 100%;
-  min-height: 20rem;
-  background: var(--bg);
-  color: var(--fg);
-  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--_ade-bg);
+  color: var(--_ade-fg);
+  font-family: var(--_ade-font);
+  font-size: var(--_ade-font-size);
+  line-height: 1.5;
 }
 
 /* ---- toolbar ---- */
@@ -69,8 +205,8 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--border);
+  background: var(--_ade-bg-raised);
+  border-bottom: 1px solid var(--_ade-border);
   /* Embedded, the editor is often narrower than the buttons need. */
   flex-wrap: wrap;
   row-gap: 0.4rem;
@@ -87,20 +223,20 @@
 
 .asciidoc-editor .button {
   padding: 0.3rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: #2b313a;
-  color: var(--fg);
+  border: 1px solid var(--_ade-border);
+  border-radius: var(--_ade-radius);
+  background: var(--_ade-button-bg);
+  color: var(--_ade-fg);
   font: inherit;
   cursor: pointer;
 }
-.asciidoc-editor .button:hover { border-color: var(--accent); color: #fff; }
-.asciidoc-editor .button.active { background: var(--accent); border-color: var(--accent); color: #10151c; }
-.asciidoc-editor .button.danger { border-color: #5b3138; color: #ff9d9d; }
-.asciidoc-editor .button.danger:hover { background: #4a262c; border-color: #8b4a52; color: #fff; }
+.asciidoc-editor .button:hover { border-color: var(--_ade-accent); color: var(--_ade-fg-hover); }
+.asciidoc-editor .button.active { background: var(--_ade-accent); border-color: var(--_ade-accent); color: var(--_ade-accent-fg); }
+.asciidoc-editor .button.danger { border-color: var(--_ade-danger-border); color: var(--_ade-danger); }
+.asciidoc-editor .button.danger:hover { background: var(--_ade-danger-bg); border-color: var(--_ade-danger); color: var(--_ade-danger); }
 
 .asciidoc-editor .button:disabled { opacity: 0.35; cursor: default; }
-.asciidoc-editor .button:disabled:hover { border-color: var(--border); color: var(--fg); }
+.asciidoc-editor .button:disabled:hover { border-color: var(--_ade-border); color: var(--_ade-fg); }
 
 .asciidoc-editor .modes, .asciidoc-editor .tools { display: flex; gap: 0.25rem; }
 
@@ -108,7 +244,7 @@
   width: 1px;
   align-self: stretch;
   margin: 0 0.25rem;
-  background: var(--border);
+  background: var(--_ade-border);
 }
 
 .asciidoc-editor .button.icon {
@@ -118,58 +254,61 @@
   /*
    * Emoji fonts last, so letters still use the interface font and only the
    * symbols fall back. `inherit` cannot appear in a font-family list — it
-   * invalidates the whole declaration — so the stack is repeated.
+   * invalidates the whole declaration — so the stack is taken from the
+   * variable instead.
    */
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif,
+  font-family: var(--_ade-font),
     "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji";
 }
-.asciidoc-editor .button.icon code { font-size: 11px; }
+.asciidoc-editor .button.icon code { font-size: 0.85em; }
 .asciidoc-editor .button input[type="file"] { display: none; }
 
 /*
- * The image panel hangs below the toolbars rather than sitting in the column,
- * so opening it does not push the document down.
+ * The link and image panels hang over the top of the panes, below the
+ * toolbars, rather than sitting in the column, so opening one does not push
+ * the document down. Inside the panes, they sit below the toolbars however
+ * many rows those wrap into.
  */
 .asciidoc-editor .panel {
   position: absolute;
   z-index: 10;
-  top: 5.2rem;
+  top: 0;
   left: 0;
   right: 0;
   display: flex;
   align-items: flex-end;
   gap: 0.6rem;
   padding: 0.6rem 0.75rem;
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  background: var(--_ade-bg-raised);
+  border-bottom: 1px solid var(--_ade-border);
+  box-shadow: 0 8px 20px var(--_ade-shadow);
 }
 
 .asciidoc-editor .panel label {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 11px;
-  color: var(--fg-dim);
+  font-size: 0.85em;
+  color: var(--_ade-fg-dim);
 }
 
 .asciidoc-editor .panel label.button {
   flex-direction: row;
   align-items: center;
   font-size: inherit;
-  color: var(--fg);
+  color: var(--_ade-fg);
 }
 
 .asciidoc-editor .panel input[type="text"] {
   min-width: 18rem;
   padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: #10151c;
-  color: var(--fg);
+  border: 1px solid var(--_ade-border);
+  border-radius: var(--_ade-radius);
+  background: var(--_ade-input-bg);
+  color: var(--_ade-fg);
   font: inherit;
 }
-.asciidoc-editor .panel input[type="text"]:focus { outline: none; border-color: var(--accent); }
+.asciidoc-editor .panel input[type="text"]:focus { outline: none; border-color: var(--_ade-accent); }
 .asciidoc-editor .panel input[type="file"] { display: none; }
 
 /* ---- panes ---- */
@@ -185,7 +324,7 @@
   min-height: calc(1.5em + 1.2rem + 2px + 1px);
   padding-top: 0.3rem;
   padding-bottom: 0.3rem;
-  background: #1e242c;
+  background: var(--_ade-bg-context);
   /*
    * This bar alone scrolls rather than wraps. Its buttons change with what is
    * focused, so wrapping would grow it a row the moment a block is clicked,
@@ -199,23 +338,24 @@
 .asciidoc-editor .chip {
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  background: #2b313a;
-  color: var(--fg-dim);
-  font-size: 11px;
+  background: var(--_ade-button-bg);
+  color: var(--_ade-fg-dim);
+  font-size: 0.85em;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.asciidoc-editor .hint { color: var(--fg-dim); font-style: italic; }
+.asciidoc-editor .hint { color: var(--_ade-fg-dim); font-style: italic; }
 
 .asciidoc-editor .panes {
+  position: relative;
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 1px 1fr;
   min-height: 0;
 }
 
-.asciidoc-editor .divider { background: var(--border); }
+.asciidoc-editor .divider { background: var(--_ade-border); }
 
 /*
  * Rich-text mode hides the source pane rather than unmounting it, so the
@@ -225,7 +365,7 @@
 .asciidoc-editor .panes.rich .editor,
 .asciidoc-editor .panes.rich .divider { display: none; }
 
-.asciidoc-editor .preview { min-width: 0; background: #fff; }
+.asciidoc-editor .preview { min-width: 0; background: var(--_ade-preview-bg); }
 .asciidoc-editor .preview iframe { width: 100%; height: 100%; border: 0; display: block; }
 
 /* ---- editor: transparent textarea over a highlighted <pre> ---- */
@@ -245,11 +385,11 @@
   position: absolute;
   inset: 0;
   margin: 0;
-  padding: var(--editor-pad);
+  padding: var(--_ade-pad);
   border: 0;
-  font-family: var(--editor-font);
-  font-size: var(--editor-size);
-  line-height: var(--editor-line);
+  font-family: var(--_ade-mono-font);
+  font-size: var(--_ade-mono-size);
+  line-height: var(--_ade-mono-line);
   tab-size: 4;
   white-space: pre-wrap;
   overflow-wrap: break-word;
@@ -259,7 +399,7 @@
 .asciidoc-editor .editor .overlay {
   overflow: hidden;
   pointer-events: none;
-  color: var(--fg);
+  color: var(--_ade-fg);
 }
 
 .asciidoc-editor .editor .source {
@@ -267,39 +407,39 @@
   overflow-y: auto;
   background: transparent;
   color: transparent;
-  caret-color: var(--accent);
+  caret-color: var(--_ade-accent);
 }
 .asciidoc-editor .editor .source:focus { outline: none; }
-.asciidoc-editor .editor .source::selection { background: rgba(127, 180, 255, 0.28); }
+.asciidoc-editor .editor .source::selection { background: var(--_ade-selection); }
 
 /* ---- token colours ---- */
 
-.asciidoc-editor .ad-heading     { color: #ff9d6b; font-weight: 600; }
-.asciidoc-editor .ad-delim       { color: #6b7684; }
-.asciidoc-editor .ad-verbatim    { color: #9ecbff; }
-.asciidoc-editor .ad-comment     { color: #6b7684; font-style: italic; }
-.asciidoc-editor .ad-attr-entry  { color: #d2a8ff; }
-.asciidoc-editor .ad-attr-list   { color: #d2a8ff; }
-.asciidoc-editor .ad-block-title { color: #e6c07b; font-style: italic; }
-.asciidoc-editor .ad-admonition  { color: #ff7b72; font-weight: 600; }
-.asciidoc-editor .ad-marker      { color: #7fb4ff; font-weight: 600; }
-.asciidoc-editor .ad-bold        { color: #f0f4f9; font-weight: 600; }
-.asciidoc-editor .ad-italic      { color: #c8d2de; font-style: italic; }
-.asciidoc-editor .ad-code        { color: #a5d6a7; }
-.asciidoc-editor .ad-mac, .asciidoc-editor .ad-url { color: #7fb4ff; text-decoration: underline; }
-.asciidoc-editor .ad-attr        { color: #d2a8ff; }
+.asciidoc-editor .ad-heading     { color: var(--_ade-syntax-heading); font-weight: 600; }
+.asciidoc-editor .ad-delim       { color: var(--_ade-syntax-delim); }
+.asciidoc-editor .ad-verbatim    { color: var(--_ade-syntax-verbatim); }
+.asciidoc-editor .ad-comment     { color: var(--_ade-syntax-delim); font-style: italic; }
+.asciidoc-editor .ad-attr-entry  { color: var(--_ade-syntax-attr); }
+.asciidoc-editor .ad-attr-list   { color: var(--_ade-syntax-attr); }
+.asciidoc-editor .ad-block-title { color: var(--_ade-syntax-title); font-style: italic; }
+.asciidoc-editor .ad-admonition  { color: var(--_ade-syntax-admonition); font-weight: 600; }
+.asciidoc-editor .ad-marker      { color: var(--_ade-syntax-marker); font-weight: 600; }
+.asciidoc-editor .ad-bold        { color: var(--_ade-syntax-bold); font-weight: 600; }
+.asciidoc-editor .ad-italic      { color: var(--_ade-syntax-italic); font-style: italic; }
+.asciidoc-editor .ad-code        { color: var(--_ade-syntax-code); }
+.asciidoc-editor .ad-mac, .asciidoc-editor .ad-url { color: var(--_ade-syntax-marker); text-decoration: underline; }
+.asciidoc-editor .ad-attr        { color: var(--_ade-syntax-attr); }
 
 /* ---- status bar ---- */
 
 .asciidoc-editor .status {
   flex: none;
   padding: 0.35rem 0.75rem;
-  background: var(--bg-raised);
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--fg-dim);
+  background: var(--_ade-bg-raised);
+  border-top: 1px solid var(--_ade-border);
+  font-size: 0.92em;
+  color: var(--_ade-fg-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.asciidoc-editor .status .warn { color: #e6c07b; }
+.asciidoc-editor .status .warn { color: var(--_ade-warn); }
